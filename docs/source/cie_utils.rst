@@ -10,7 +10,7 @@ Welcome to cie-utils's documentation!
 Module Reference
 ----------------
 
-.. automodule:: cie-utils
+.. automodule:: cie_utils
    :members:
    :undoc-members:
    :show-inheritance:
