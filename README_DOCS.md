@@ -62,7 +62,7 @@ docs/_build/html/index.html
 Use the provided script to build and deploy the documentation:
 
 ```bash
-bash publish_docs.sh
+./publish_docs.sh
 ```
 
 This script:
