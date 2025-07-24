@@ -68,6 +68,6 @@ rm -rf dist/
 python -m build
 
 # 7. Publish
-python -m twine upload dist/*
+python -m twine upload dist/* --verbose
 
 echo -e "\n${GREEN}🎉 v$NEW_VERSION published to PyPI successfully!${NC}"
