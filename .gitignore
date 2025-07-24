@@ -1,0 +1,56 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Editor/IDE settings
+.vscode/
+.idea/
+*.swp
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# PyInstaller
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Sphinx documentation
+docs/_build/
+docs/docs/  # (por si accidentalmente se genera otra vez dentro de docs)
+
+# GitHub Pages branch content (ignored in main branch)
+gh-pages/
+
+# Pre-commit cache
+.pre-commit-config.yaml.lock
+.pre-commit/
+
+# Log and temporary files
+*.log
+*.tmp
+*.bak
+*.DS_Store
+Thumbs.db
+
+# Python-wheel metadata
+*.whl
+*.pyd

@@ -1,0 +1,61 @@
+[project]
+name = "cie-utils"
+version = "0.1.0"
+description = "Image processing based on CIELAB color space."
+authors = [
+    { name = "Jesus Alberto Rodriguez Henao", email = "jarh1992@gmail.com" }
+]
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "numpy",
+    "opencv-python",
+    "scikit-image",
+    "scikit-learn",
+    "matplotlib",
+    "scipy",
+    "pandas",
+    "pyyaml",
+    "pytz"
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.black]
+line-length = 114
+target-version = ['py310']
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+
+[tool.flake8]
+ignore = ["E203", "W503"]
+max-line-length = 114
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pre-commit",
+    "black",
+    "isort",
+    "flake8"
+]
+docs = ["furo"]

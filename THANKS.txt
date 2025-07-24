@@ -1,0 +1,21 @@
+MSc. Jesus Alberto Rodriguez Henao for coding, documentation, bug-fixes, lookfor and the documentation editor.
+MSc. Santiago Arias Gómez for documentation, bug-fixes, lookfor and the documentation editor.
+Gr. Juan Mahecha Acevedo for documentation, bug-fixes, lookfor and the documentation editor.
+PhD. Cindy Lorena Gomez Heredia for research project management and consultancy.
+Ph.D. Juan Carlos Salcedo Reyes for research project management and consultancy.
+Ph.D. Marcela Franco Correa, for research project management and consultancy.
+MSc. Liliana Cortes Cortes for research project management and consultancy.
+Ph.D. Angela Guerra Vega, for research project management and consultancy.
+Ph.D. Herbert Vinck Posada for research project management and consultancy.
+Ph.D. Miguel Fuentes Cabrera, for research project management and consultancy.
+
+cie-utils is based on the project "Color-Based Characterization and Segmentation of Malaria Parasite Structures Using
+Machine Learning Models for Diagnostic Enhancement"
+
+Institutions
+------------
+
+Universidad Nacional de Colombia
+Pontificia Universidad Javeriana
+Instituto Nacional de Salud (INS)
+Northeastern University

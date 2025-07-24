@@ -1,0 +1,22 @@
+/* Personaliza encabezados */
+h1, h2, h3 {
+    color: #007acc;
+    font-family: "Segoe UI", sans-serif;
+}
+
+/* Cambia el fondo de los bloques de código */
+.highlight pre {
+    background-color: #f8f8f8;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 1em;
+}
+
+/* Ajusta el color de enlaces */
+a {
+    color: #007acc;
+}
+
+a:hover {
+    text-decoration: underline;
+}
