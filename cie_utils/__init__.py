@@ -47,7 +47,7 @@ def std4elem(x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
     Examples
     --------
     >>> import numpy as np
-    >>> from cie-utils import std4elem
+    >>> from cie_utils import std4elem
     >>> x = np.array([1.0, 2.0, 0.0, 4.0], dtype=np.float64)
     >>> std4elem(x)
     array([1.52752523, 0.15275252, 0., 1.37477271])
