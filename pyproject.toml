@@ -1,6 +1,6 @@
 [project]
 name = "cie-utils"
-version = "0.1.0"
+version = "0.1.2"
 description = "Image processing based on CIELAB color space."
 authors = [
     { name = "Jesus Alberto Rodriguez Henao", email = "jarh1992@gmail.com" }
