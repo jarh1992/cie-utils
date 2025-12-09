@@ -1,32 +1,55 @@
-[project]
+[tool.poetry]
 name = "cie-utils"
 version = "0.1.4"
 description = "Image processing based on CIELAB color space."
-authors = [
-    { name = "Jesus Alberto Rodriguez Henao", email = "jarh1992@gmail.com" }
-]
+authors = ["Jesus Alberto Rodriguez Henao <jarh1992@gmail.com>"]
 readme = "README.md"
-requires-python = ">=3.10"
-license = { text = "MIT" }
-dependencies = [
-    "numpy",
-    "opencv-python",
-    "scikit-image",
-    "scikit-learn",
-    "matplotlib",
-    "scipy",
-    "pandas",
-    "pyyaml",
-    "pytz"
+license = "MIT"
+homepage = "https://github.com/jarh1992/cie-utils"
+repository = "https://github.com/jarh1992/cie-utils"
+documentation = "https://jarh1992.github.io/cie-utils/"
+keywords = ["image-processing", "cielab", "color-space", "computer-vision"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Image Processing",
 ]
+packages = [{include = "cie_utils"}]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<4.0"
+numpy = "^2.2.0"
+opencv-python = "^4.12.0"
+scikit-image = "^0.25.0"
+scikit-learn = "^1.7.0"
+matplotlib = "^3.10.0"
+scipy = "^1.16.0"
+pandas = "^2.3.0"
+pyyaml = "^6.0.0"
+pytz = "^2025.2"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.4.0"
+pre-commit = "^4.2.0"
+black = "^25.1.0"
+isort = "^6.0.0"
+flake8 = "^7.3.0"
+
+[tool.poetry.group.docs.dependencies]
+sphinx = "^8.2.0"
+furo = "^2025.7.0"
 
 [build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
 
 [tool.black]
 line-length = 114
-target-version = ['py310']
+target-version = ['py311']
 include = '\.pyi?$'
 exclude = '''
 /(
@@ -45,17 +68,8 @@ exclude = '''
 
 [tool.isort]
 profile = "black"
+line_length = 114
 
 [tool.flake8]
-ignore = ["E203", "W503"]
 max-line-length = 114
-
-[project.optional-dependencies]
-dev = [
-    "pytest",
-    "pre-commit",
-    "black",
-    "isort",
-    "flake8"
-]
-docs = ["furo"]
+extend-ignore = ["E203", "W503"]

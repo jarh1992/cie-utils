@@ -438,7 +438,8 @@ def test_extract_segmentation():
         assert Path.mkdir.called  # At least once for dest_base_path, then for categories
         # Specific check for category folders, if needed:
         # dest_base_path = Path(mock_dest_path)
-        # (dest_base_path / 'category_A').mkdir.assert_called_once() would be more precise if we tracked args to mkdir.
+        # (dest_base_path / 'category_A').mkdir.assert_called_once() would be more precise if we tracked args to
+        # mkdir.
 
         # Check if cv2.imwrite was called for segmented images (image and ref image for each segment)
         assert mock_imwrite.call_count == 4  # 2 segments * (img + rimg)
@@ -542,7 +543,8 @@ def test_sort_classifier_results_by_pixel():
     labels = np.array([0] * 20 + [1] * 80)  # 20 pixels in cluster 0, 80 in cluster 1
     centers = np.array([[10, 20, 30], [40, 50, 60]], dtype=np.float64)  # Cluster 0, Cluster 1 centers
 
-    # Reconstruct image based on labels and centers for correct `mean_colors` calculation within sort_classifier_results
+    # Reconstruct image based on labels and centers for correct `mean_colors` calculation within
+    # sort_classifier_results
     image_reconstructed = np.zeros_like(image)
     for i in range(len(labels)):
         image_reconstructed[i] = centers[labels[i]]

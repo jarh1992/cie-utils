@@ -27,17 +27,26 @@
 
 ## 📦 Installation
 
-**From local source**
+**From PyPI**
 
 ```bash
-pip install .
+pip install cie-utils
 ```
 
 **From GitHub**
 
 ```bash
 pip install git+https://github.com/jarh1992/cie-utils.git
-pip install cie-utils
+```
+
+**From local source (for development)**
+
+```bash
+# Using Poetry (recommended for development)
+poetry install
+
+# Or using pip
+pip install .
 ```
 
 ---
