@@ -1,11 +1,18 @@
 import os
 import sys
+import tomllib
+from pathlib import Path
 
 sys.path.insert(0, os.path.abspath("../.."))
 
+# Read version from pyproject.toml
+pyproject_path = Path(__file__).parent.parent.parent / "pyproject.toml"
+with open(pyproject_path, "rb") as f:
+    pyproject = tomllib.load(f)
+    release = pyproject["tool"]["poetry"]["version"]
+
 project = "cie-utils"
 author = "Jesus Alberto Rodriguez Henao"
-release = "0.1.0"
 
 # -- General configuration ---------------------------------------------------
 extensions = [
