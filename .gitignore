@@ -39,6 +39,7 @@ docs/docs/  # (por si accidentalmente se genera otra vez dentro de docs)
 
 # GitHub Pages branch content (ignored in main branch)
 gh-pages/
+.gh-pages-tmp/
 
 # Pre-commit cache
 .pre-commit-config.yaml.lock

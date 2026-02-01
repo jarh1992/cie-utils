@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # release.sh
-# Script to automate version bumping, git tagging, and PyPI publication using Poetry.
+# Script to automate version bumping and git tagging.
+# PyPI publishing and docs deployment are handled by GitHub Actions.
 
 set -e
 
@@ -13,7 +14,7 @@ NC='\033[0m'
 # Helper to print usage
 print_usage() {
   echo -e "${GREEN}Usage: $0 [patch|minor|major]${NC}"
-  echo -e "Increments version, commits, tags, builds, and uploads to PyPI using Poetry."
+  echo -e "Increments version, commits, and tags. GitHub Actions handles PyPI publishing and docs deployment."
 }
 
 # 1. Check argument
@@ -45,11 +46,7 @@ git tag "v$NEW_VERSION"
 git push
 git push --tags
 
-# 5. Build and publish using Poetry
-echo -e "${GREEN}Building package...${NC}"
-poetry build
-
-echo -e "${GREEN}Publishing to PyPI...${NC}"
-poetry publish
-
-echo -e "\n${GREEN}🎉 v$NEW_VERSION published to PyPI successfully!${NC}"
+echo -e "\n${GREEN}🚀 Tag v$NEW_VERSION pushed! GitHub Actions will:${NC}"
+echo -e "   - Run tests"
+echo -e "   - Publish to PyPI"
+echo -e "   - Deploy documentation to GitHub Pages"

@@ -3,6 +3,8 @@
 > Advanced image processing in Python using the **CIELAB** color space.
 
 [![CI](https://github.com/jarh1992/cie-utils/actions/workflows/ci.yml/badge.svg)](https://github.com/jarh1992/cie-utils/actions/workflows/ci.yml)
+[![PyPI](https://github.com/jarh1992/cie-utils/actions/workflows/publish.yml/badge.svg)](https://github.com/jarh1992/cie-utils/actions/workflows/publish.yml)
+[![Docs](https://github.com/jarh1992/cie-utils/actions/workflows/deploy_docs.yml/badge.svg)](https://jarh1992.github.io/cie-utils/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python)](https://www.python.org/)
 [![pre-commit](https://img.shields.io/badge/code%20style-pre--commit%20%7C%20black%2C%20isort%2C%20flake8-blueviolet?logo=pre-commit)](https://pre-commit.com/)
@@ -63,7 +65,7 @@ lab_img = rgb2lab(normalize_img(img, ref_img))
 
 ## 🧰 Development & Code Style
 
-This project uses:
+This project uses [Poetry](https://python-poetry.org/) for dependency management:
 
 - 🖤 [`black`](https://github.com/psf/black) for code formatting
 - 🔠 [`isort`](https://github.com/PyCQA/isort) for import sorting
@@ -74,17 +76,43 @@ This project uses:
 To install dev dependencies:
 
 ```bash
-pip install -e .[dev]
-pre-commit install
+poetry install
+poetry run pre-commit install
+```
+
+Run tests:
+
+```bash
+poetry run pytest
 ```
 
 ---
 
 ## 📚 Documentation
 
-Documentation is automatically generated with **Sphinx** and hosted via **GitHub Pages** at:
+Documentation is automatically generated with **Sphinx** and hosted via **GitHub Pages**:
 
 👉 https://jarh1992.github.io/cie-utils/
+
+Documentation is automatically rebuilt and deployed on every release.
+
+---
+
+## 🚀 Release Process
+
+Releases are automated via GitHub Actions. To create a new release:
+
+```bash
+./release_workflow.sh [patch|minor|major]
+```
+
+This will:
+1. Bump the version in `pyproject.toml`
+2. Commit and push a version tag
+3. GitHub Actions automatically:
+   - Runs tests on Python 3.11 and 3.12
+   - Publishes the package to PyPI
+   - Deploys updated documentation to GitHub Pages
 
 ---
 
