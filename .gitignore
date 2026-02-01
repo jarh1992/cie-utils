@@ -54,3 +54,8 @@ Thumbs.db
 # Python-wheel metadata
 *.whl
 *.pyd
+
+# IA tools
+CLAUDE.md
+.claude
+nul
