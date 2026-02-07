@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 from time import time
 from typing import Any
+import os
 
 import cv2
 import matplotlib.pyplot as plt
@@ -12,11 +13,14 @@ import numpy.typing as npt
 import pandas as pd
 import yaml
 from pytz import timezone
+from scipy.interpolate import interp1d, make_interp_spline
+from scipy.ndimage import median_filter
 from scipy.stats import gaussian_kde, iqr
 from skimage import filters
 from skimage.color import lab2lch, lab2rgb, rgb2lab
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.mixture import GaussianMixture
+import warnings
 
 black_px = np.array([0.0, 0.0, 0.0])
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -1352,3 +1356,1079 @@ def transform_img(
     lab_image_eq = np.float32(lab_image_eq)
 
     return [blur_image, rgb_image_eq, lab_image_eq]
+
+def find_intersections(x1: np.ndarray, y1: np.ndarray,
+                       x2: np.ndarray, y2: np.ndarray,
+                       distance_threshold: float = 5.0) -> list[tuple[float, float]]:
+    """
+    Find intersection points between two curves, ignoring nearby points.
+
+    Parameters
+    ----------
+    x1 : np.ndarray
+        X-coordinates of the first curve.
+    y1 : np.ndarray
+        Y-coordinates of the first curve.
+    x2 : np.ndarray
+        X-coordinates of the second curve.
+    y2 : np.ndarray
+        Y-coordinates of the second curve.
+    distance_threshold : float, optional
+        Minimum distance between intersections to consider them distinct
+        (default is 5.0).
+
+    Returns
+    -------
+    list of tuple of (float, float)
+        List of (x, y) tuples with the intersections found.
+    """
+    # Create interpolated functions for both curves
+    f1 = interp1d(x1, y1, kind='linear', bounds_error=False, fill_value=0)
+    f2 = interp1d(x2, y2, kind='linear', bounds_error=False, fill_value=0)
+
+    # Create a common finer grid for greater precision
+    x_min = max(x1.min(), x2.min())
+    x_max = min(x1.max(), x2.max())
+
+    if x_min >= x_max:
+        return []
+
+    x_common = np.linspace(x_min, x_max, 10000)
+
+    # Compute the difference between the curves
+    diff = f1(x_common) - f2(x_common)
+
+    # Find where the difference changes sign (intersections)
+    intersections = []
+    for i in range(len(diff) - 1):
+        if diff[i] * diff[i + 1] <= 0:  # Sign change
+            # Linear interpolation to find the exact point
+            if diff[i + 1] - diff[i] != 0:
+                x_int = x_common[i] - diff[i] * (x_common[i + 1] - x_common[i]) / (diff[i + 1] - diff[i])
+            else:
+                x_int = x_common[i]
+
+            # Filter points too close to existing intersections
+            add_point = True
+            for existing_x, _ in intersections:
+                if abs(x_int - existing_x) < distance_threshold:
+                    add_point = False
+                    break
+
+            if add_point:
+                intersections.append((x_int, f1(x_int)))
+
+    return intersections
+
+
+def filter_intersections_for_console(intersections: list[tuple[float, float]],
+                                     distance_threshold: float = 1.0) -> list[tuple[float, float]]:
+    """
+    Filter intersections for console output, removing nearby points.
+
+    Parameters
+    ----------
+    intersections : list of tuple of (float, float)
+        List of (x, y) intersections.
+    distance_threshold : float, optional
+        Minimum distance between points to keep them separate (default is 1.0).
+
+    Returns
+    -------
+    list of tuple of (float, float)
+        Filtered list of intersections.
+    """
+    if not intersections:
+        return []
+
+    # Sort by X value
+    sorted_intersections = sorted(intersections, key=lambda x: x[0])
+    filtered_intersections = [sorted_intersections[0]]
+
+    for i in range(1, len(sorted_intersections)):
+        x_current, y_current = sorted_intersections[i]
+        x_previous, y_previous = filtered_intersections[-1]
+
+        # Check distance with the last added intersection
+        if abs(x_current - x_previous) >= distance_threshold:
+            filtered_intersections.append((x_current, y_current))
+
+    return filtered_intersections
+
+
+def detect_number_of_clusters(labels_dir: str) -> int:
+    """
+    Automatically detect the number of clusters used.
+
+    Parameters
+    ----------
+    labels_dir : str
+        Directory containing label files.
+
+    Returns
+    -------
+    int
+        Number of clusters detected.
+    """
+    if not os.path.exists(labels_dir):
+        warnings.warn(f"Labels directory does not exist: {labels_dir}. Using 3 clusters by default.")
+        return 3
+
+    label_files = [f for f in os.listdir(labels_dir) if f.endswith('_labels.npy')]
+
+    if not label_files:
+        warnings.warn(f"No label files found in {labels_dir}. Using 3 clusters by default.")
+        return 3
+
+    # Load the first label file to detect the number of clusters
+    first_file = os.path.join(labels_dir, label_files[0])
+    labels = np.load(first_file)
+    unique_clusters = np.unique(labels)
+
+    # Exclude cluster 0 if it exists
+    valid_clusters = [c for c in unique_clusters if c != 0]
+
+    return len(valid_clusters)
+
+
+def combine_red_blood_cell_clusters(data: dict, n_clusters: int) -> tuple[dict, int]:
+    """
+    Combine clusters 3 and 4 into a single cluster for red blood cells.
+
+    Parameters
+    ----------
+    data : dict
+        Dictionary with cluster data.
+    n_clusters : int
+        Original number of clusters.
+
+    Returns
+    -------
+    tuple of (dict, int)
+        Modified data and new number of clusters.
+    """
+    if n_clusters >= 4:
+        # Combine data from clusters 3 and 4
+        for component in ['L', 'a', 'b']:
+            if 4 in data:
+                data[3][component].extend(data[4][component])
+
+        # Remove cluster 4 if it exists
+        if 4 in data:
+            del data[4]
+
+        return data, n_clusters - 1
+    return data, n_clusters
+
+
+def get_automatic_names_and_colors(n_clusters: int) -> tuple[dict, dict]:
+    """
+    Automatically generate names and colors based on the number of clusters.
+
+    Parameters
+    ----------
+    n_clusters : int
+        Number of clusters.
+
+    Returns
+    -------
+    tuple of (dict, dict)
+        A tuple containing a names dictionary and a colors dictionary.
+    """
+    # Predefined names for common clusters
+    predefined_names = {
+        1: ["Cluster 1"],
+        2: ["Chromatin", "Cytoplasm"],
+        3: ["Chromatin", "Cytoplasm", "Red blood cell"],
+        4: ["Chromatin", "Cytoplasm", "Red blood cell", "Background"],
+        5: ["Chromatin", "Cytoplasm", "Red blood cell", "Background", "Other"]
+    }
+
+    # Predefined colors (distinctive color scale)
+    predefined_colors = ['red', 'blue', 'green', 'orange', 'purple',
+                         'brown', 'pink', 'gray', 'olive', 'cyan']
+
+    # Get names
+    if n_clusters in predefined_names:
+        names = {i + 1: predefined_names[n_clusters][i] for i in range(n_clusters)}
+    else:
+        names = {i + 1: f"Cluster {i + 1}" for i in range(n_clusters)}
+
+    # Get colors
+    colors = {i + 1: predefined_colors[i % len(predefined_colors)] for i in range(n_clusters)}
+
+    return names, colors
+
+
+def process_image_with_sampling(image_path: str, label_path: str, data: dict,
+                                n_clusters: int, use_sampling: bool = False,
+                                sampling_fraction: float = 0.25) -> None:
+    """
+    Process an image with optional random pixel sampling.
+
+    Parameters
+    ----------
+    image_path : str
+        Path to the .npy image file.
+    label_path : str
+        Path to the .npy label file.
+    data : dict
+        Dictionary for storing data.
+    n_clusters : int
+        Number of clusters.
+    use_sampling : bool, optional
+        If True, use random sampling (default is False).
+    sampling_fraction : float, optional
+        Fraction of pixels to sample (default is 0.25).
+    """
+    # Load data
+    labels = np.load(label_path)
+    lab_image = np.load(image_path)
+
+    h, w = labels.shape
+    total_pixels = h * w
+
+    if use_sampling:
+        # Create random sampling mask over ALL pixels
+        final_mask = np.random.choice(
+            [True, False],
+            size=total_pixels,
+            p=[sampling_fraction, 1 - sampling_fraction]
+        )
+
+        # Flatten arrays with sampling
+        L_flat = lab_image[:, :, 0].flatten()[final_mask]
+        a_flat = lab_image[:, :, 1].flatten()[final_mask]
+        b_flat = lab_image[:, :, 2].flatten()[final_mask]
+        labels_flat = labels.flatten()[final_mask]
+
+    else:
+        # Full processing (no sampling)
+        L_flat = lab_image[:, :, 0].flatten()
+        a_flat = lab_image[:, :, 1].flatten()
+        b_flat = lab_image[:, :, 2].flatten()
+        labels_flat = labels.flatten()
+
+    # Extract data for each cluster
+    for cluster_id in range(1, n_clusters + 1):
+        mask = (labels_flat == cluster_id)
+        data[cluster_id]["L"].extend(L_flat[mask])
+        data[cluster_id]["a"].extend(a_flat[mask])
+        data[cluster_id]["b"].extend(b_flat[mask])
+
+
+def compute_histograms(data: dict, n_clusters: int, bins: int = 40) -> dict:
+    """
+    Compute smoothed histograms for all clusters and components.
+
+    Parameters
+    ----------
+    data : dict
+        Dictionary with cluster data.
+    n_clusters : int
+        Number of clusters.
+    bins : int, optional
+        Number of bins for the histogram (default is 40).
+
+    Returns
+    -------
+    dict
+        Dictionary with smoothed curves per component and cluster.
+    """
+    smoothed_curves = {'L': {}, 'a': {}, 'b': {}}
+
+    for cluster_id in range(1, n_clusters + 1):
+        for comp in ['L', 'a', 'b']:
+            values = np.array(data[cluster_id][comp])
+
+            if len(values) > 0:
+                # Compute histogram
+                counts, bins_edges = np.histogram(values, bins=bins)
+                centers = (bins_edges[:-1] + bins_edges[1:]) / 2
+
+                try:
+                    # Smooth with spline
+                    if len(centers) >= 4:  # Required for cubic spline
+                        spline = make_interp_spline(centers, counts, k=3)
+                        x_smooth = np.linspace(centers.min(), centers.max(), 500)
+                        y_smooth = spline(x_smooth)
+                        smoothed_curves[comp][cluster_id] = (x_smooth, y_smooth)
+                    else:
+                        # Not enough points, use linear interpolation
+                        smoothed_curves[comp][cluster_id] = (centers, counts)
+                except Exception as e:
+                    # Fallback to original data
+                    smoothed_curves[comp][cluster_id] = (centers, counts)
+
+    return smoothed_curves
+
+
+def compute_all_intersections(smoothed_curves: dict, names: dict,
+                              distance_threshold: float = 6.0) -> dict:
+    """
+    Compute all intersections between cluster pairs for each component.
+
+    Parameters
+    ----------
+    smoothed_curves : dict
+        Dictionary with curves per component and cluster.
+    names : dict
+        Dictionary of cluster names.
+    distance_threshold : float, optional
+        Threshold for filtering nearby intersections (default is 6.0).
+
+    Returns
+    -------
+    dict
+        Dictionary with intersections per component and cluster pair.
+    """
+    intersections_by_component = {'L': {}, 'a': {}, 'b': {}}
+
+    for comp in ['L', 'a', 'b']:
+        present_clusters = list(smoothed_curves[comp].keys())
+
+        # Generate all unique pairs
+        pairs = [(i, j) for i in present_clusters for j in present_clusters if i < j]
+
+        for id1, id2 in pairs:
+            x1, y1 = smoothed_curves[comp][id1]
+            x2, y2 = smoothed_curves[comp][id2]
+
+            intersections = find_intersections(x1, y1, x2, y2, distance_threshold)
+
+            if intersections:
+                pair_name = f"{names[id1]}-{names[id2]}"
+                intersections_by_component[comp][pair_name] = intersections
+
+    return intersections_by_component
+
+
+def plot_distributions_with_intersections(smoothed_curves: dict,
+                                          names: dict, colors: dict,
+                                          intersections_by_component: dict,
+                                          show_plots: bool = True) -> plt.Figure | None:
+    """
+    Plot distributions with marked intersections.
+
+    Parameters
+    ----------
+    smoothed_curves : dict
+        Dictionary with smoothed curves.
+    names : dict
+        Dictionary of cluster names.
+    colors : dict
+        Dictionary of colors per cluster.
+    intersections_by_component : dict
+        Computed intersections.
+    show_plots : bool, optional
+        If True, display the plots (default is True).
+
+    Returns
+    -------
+    matplotlib.figure.Figure or None
+        Matplotlib figure if ``show_plots`` is False, otherwise None.
+    """
+    if not show_plots:
+        return None
+
+    fig, axes = plt.subplots(1, 3, figsize=(20, 6))
+    fig.suptitle('Frequency Distributions by LAB Component', fontsize=16)
+
+    components = ['L', 'a', 'b']
+    titles = ['L Distribution (Luminosity)',
+              'a Distribution (Green-Red)',
+              'b Distribution (Blue-Yellow)']
+
+    for idx, comp in enumerate(components):
+        ax = axes[idx]
+
+        # Plot all curves
+        for cluster_id, (x_smooth, y_smooth) in smoothed_curves[comp].items():
+            ax.plot(x_smooth, y_smooth, color=colors[cluster_id],
+                    label=names[cluster_id], linewidth=2.5, alpha=0.8)
+
+        # Mark intersections for this component
+        for pair_name, intersections in intersections_by_component[comp].items():
+            for x_int, y_int in intersections:
+                # Vertical line at the intersection
+                ax.axvline(x=x_int, color='gray', linestyle='--', alpha=0.7, linewidth=1)
+                # Point on the X axis
+                ax.plot(x_int, 0, 'o', markersize=8, markeredgewidth=2,
+                        markerfacecolor='yellow', markeredgecolor='black')
+                # Label with the value
+                ax.text(x_int, ax.get_ylim()[1] * 0.05, f'{x_int:.1f}',
+                        fontsize=9, ha='center', va='bottom', rotation=90,
+                        bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.9))
+
+        ax.set_xlabel(f'{comp} Value')
+        ax.set_ylabel('Frequency (pixels)')
+        ax.set_title(titles[idx])
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+
+    if show_plots:
+        plt.show()
+        return None
+    else:
+        return fig
+
+
+def print_intersection_summary(intersections_by_component: dict,
+                               names: dict, n_clusters: int) -> None:
+    """
+    Print a summary of intersections to the console.
+
+    Parameters
+    ----------
+    intersections_by_component : dict
+        Dictionary with intersections.
+    names : dict
+        Dictionary of cluster names.
+    n_clusters : int
+        Number of clusters.
+    """
+    print("\n" + "=" * 60)
+    print(f"INTERSECTION POINTS SUMMARY ({n_clusters} CLUSTERS)")
+    print("=" * 60)
+
+    for comp in ['L', 'a', 'b']:
+        print(f"\n--- Component {comp} ---")
+
+        if comp in intersections_by_component and intersections_by_component[comp]:
+            for pair_name, intersections in intersections_by_component[comp].items():
+                print(f"\nIntersections {pair_name}:")
+
+                if intersections:
+                    filtered_intersections = filter_intersections_for_console(
+                        intersections, distance_threshold=3.0
+                    )
+
+                    for i, (x, y) in enumerate(filtered_intersections, 1):
+                        print(f"  Point {i}: x = {x:.2f}")
+
+                    # Filtering statistics
+                    if intersections and filtered_intersections:
+                        print(f"  (Filtered: {len(intersections)} -> {len(filtered_intersections)} points)")
+                else:
+                    print("  No significant intersections")
+        else:
+            print("  No intersections for this component")
+
+
+def analyze_lab_distributions(input_dir: str, labels_dir: str,
+                              use_sampling: bool = False,
+                              sampling_fraction: float = 0.25,
+                              show_plots: bool = True,
+                              bins: int = 40) -> dict:
+    """
+    Main function to analyze LAB distributions and compute intersections.
+
+    Parameters
+    ----------
+    input_dir : str
+        Directory with .npy image files.
+    labels_dir : str
+        Directory with .npy label files.
+    use_sampling : bool, optional
+        If True, use random sampling (default is False).
+    sampling_fraction : float, optional
+        Fraction of pixels to sample (default is 0.25).
+    show_plots : bool, optional
+        If True, display plots (default is True).
+    bins : int, optional
+        Number of bins for histograms (default is 40).
+
+    Returns
+    -------
+    dict
+        Dictionary with all analysis results including keys: ``'data'``,
+        ``'n_clusters'``, ``'names'``, ``'colors'``, ``'smoothed_curves'``,
+        ``'intersections_by_component'``, ``'num_images_processed'``,
+        ``'use_sampling'``, ``'sampling_fraction'``.
+    """
+    # Detect number of clusters
+    n_clusters = detect_number_of_clusters(labels_dir)
+    print(f"Number of clusters detected: {n_clusters}")
+
+    # Initialize data
+    data = {cluster_id: {"L": [], "a": [], "b": []} for cluster_id in range(1, n_clusters + 1)}
+
+    # Process images
+    if not os.path.exists(labels_dir):
+        raise ValueError(f"No label files found in {labels_dir}")
+
+    label_files = [f for f in os.listdir(labels_dir) if f.endswith('_labels.npy')]
+
+    if not label_files:
+        raise ValueError(f"No label files found in {labels_dir}")
+
+    print(f"Processing {len(label_files)} images...")
+
+    for i, file in enumerate(label_files, 1):
+        base_name = file.replace("_labels.npy", "")
+        label_path = os.path.join(labels_dir, file)
+        image_path = os.path.join(input_dir, f"{base_name}.npy")
+
+        if not os.path.exists(image_path):
+            warnings.warn(f"Image not found: {image_path}")
+            continue
+
+        process_image_with_sampling(image_path, label_path, data, n_clusters,
+                                    use_sampling, sampling_fraction)
+
+        if i % 10 == 0:
+            print(f"  Processed {i}/{len(label_files)} images")
+
+    # Combine clusters if necessary
+    data, n_clusters = combine_red_blood_cell_clusters(data, n_clusters)
+
+    # Get names and colors
+    names, colors = get_automatic_names_and_colors(n_clusters)
+
+    # Compute smoothed histograms
+    print("Computing smoothed histograms...")
+    smoothed_curves = compute_histograms(data, n_clusters, bins)
+
+    # Compute intersections
+    print("Computing intersections...")
+    intersections_by_component = compute_all_intersections(
+        smoothed_curves, names
+    )
+
+    # Plot (if requested)
+    if show_plots:
+        print("Generating plots...")
+        plot_distributions_with_intersections(
+            smoothed_curves, names, colors, intersections_by_component, True
+        )
+
+    # Print summary
+    print_intersection_summary(intersections_by_component, names, n_clusters)
+
+    # Return all results
+    return {
+        'data': data,
+        'n_clusters': n_clusters,
+        'names': names,
+        'colors': colors,
+        'smoothed_curves': smoothed_curves,
+        'intersections_by_component': intersections_by_component,
+        'num_images_processed': len(label_files),
+        'use_sampling': use_sampling,
+        'sampling_fraction': sampling_fraction if use_sampling else 1.0
+    }
+
+def apply_median_filter(image: np.ndarray, kernel_size: int = 3) -> np.ndarray:
+    """
+    Apply a median filter to an image.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        Numpy array with the image (2D or 3D for RGB).
+    kernel_size : int, optional
+        Kernel size (must be odd) (default is 3).
+
+    Returns
+    -------
+    np.ndarray
+        Filtered image.
+
+    Raises
+    ------
+    ValueError
+        If kernel_size is not odd or is <= 0.
+    """
+    if kernel_size <= 0:
+        raise ValueError("kernel_size must be greater than 0")
+    if kernel_size % 2 == 0:
+        raise ValueError("kernel_size must be odd")
+
+    return median_filter(image, size=kernel_size)
+
+
+def apply_median_filter_rgb(rgb_image: np.ndarray, kernel_size: int = 3) -> np.ndarray:
+    """
+    Apply a median filter to an RGB image (3 channels).
+
+    Parameters
+    ----------
+    rgb_image : np.ndarray
+        Numpy array with the RGB image (H, W, 3).
+    kernel_size : int, optional
+        Kernel size (must be odd) (default is 3).
+
+    Returns
+    -------
+    np.ndarray
+        Filtered RGB image.
+
+    Raises
+    ------
+    ValueError
+        If the image does not have 3 channels.
+    """
+    if len(rgb_image.shape) != 3 or rgb_image.shape[2] != 3:
+        raise ValueError("Image must have 3 channels (RGB)")
+
+    filtered_image = np.zeros_like(rgb_image)
+    for channel in range(3):
+        filtered_image[:, :, channel] = apply_median_filter(
+            rgb_image[:, :, channel], kernel_size
+        )
+
+    return filtered_image
+
+
+def process_npy_images(input_folder: str, output_folder: str,
+                       kernel_size: int = 3, process_rgb: bool = True) -> None:
+    """
+    Process all .npy images in a folder by applying a median filter.
+
+    Parameters
+    ----------
+    input_folder : str
+        Path to the folder with .npy files.
+    output_folder : str
+        Path where processed images will be saved.
+    kernel_size : int, optional
+        Kernel size (must be odd) (default is 3).
+    process_rgb : bool, optional
+        If True, process as RGB (3 channels); if False, as grayscale
+        (default is True).
+
+    Raises
+    ------
+    ValueError
+        If folders do not exist or kernel_size is invalid.
+    """
+    if not os.path.exists(input_folder):
+        raise ValueError(f"Input folder does not exist: {input_folder}")
+
+    if kernel_size <= 0 or kernel_size % 2 == 0:
+        raise ValueError("kernel_size must be a positive odd number")
+
+    # Create output folder if it does not exist
+    os.makedirs(output_folder, exist_ok=True)
+
+    # Get .npy files
+    files = [f for f in os.listdir(input_folder) if f.lower().endswith('.npy')]
+
+    for filename in files:
+        try:
+            input_path = os.path.join(input_folder, filename)
+            image = np.load(input_path)
+
+            if process_rgb:
+                # Verify it is RGB
+                if len(image.shape) != 3 or image.shape[2] != 3:
+                    print(f"Warning: {filename} is not RGB. Skipping...")
+                    continue
+                filtered_image = apply_median_filter_rgb(image, kernel_size)
+            else:
+                # Process as grayscale
+                filtered_image = apply_median_filter(image, kernel_size)
+
+            # Save result
+            base_name = os.path.splitext(filename)[0]
+            output_path = os.path.join(output_folder, f"{base_name}_filtered.npy")
+            np.save(output_path, filtered_image)
+
+        except Exception as e:
+            print(f"Error processing {filename}: {str(e)}")
+
+
+def create_test_matrix(size: int = 5, kind: str = 'ordered') -> np.ndarray:
+    """
+    Create test matrices to verify the median filter.
+
+    Parameters
+    ----------
+    size : int, optional
+        Size of the square matrix (default is 5).
+    kind : str, optional
+        Type of matrix: ``'ordered'``, ``'random'``, ``'stepped'``, or
+        ``'edges'`` (default is ``'ordered'``).
+
+    Returns
+    -------
+    np.ndarray
+        Test matrix.
+
+    Raises
+    ------
+    ValueError
+        If the matrix type is not valid.
+    """
+    if kind == 'ordered':
+        # Matrix with sequentially ordered values
+        return np.array([[i + j * size for i in range(size)]
+                         for j in range(size)], dtype=np.float32)
+
+    elif kind == 'random':
+        # Matrix with random values
+        np.random.seed(42)  # For reproducibility
+        return np.random.randint(0, 100, (size, size)).astype(np.float32)
+
+    elif kind == 'stepped':
+        # Matrix with stepped values (good for verifying filters)
+        matrix = np.zeros((size, size), dtype=np.float32)
+        for i in range(size):
+            for j in range(size):
+                matrix[i, j] = max(i, j)
+        return matrix
+
+    elif kind == 'edges':
+        # Matrix with high edges and low center (for testing edge preservation)
+        matrix = np.ones((size, size), dtype=np.float32) * 10
+        border = size // 4
+        matrix[:border, :] = 100   # Top edge
+        matrix[-border:, :] = 100  # Bottom edge
+        matrix[:, :border] = 100   # Left edge
+        matrix[:, -border:] = 100  # Right edge
+        return matrix
+
+    else:
+        raise ValueError(f"Invalid matrix type: {kind}")
+
+
+def compute_manual_median(matrix: np.ndarray, i: int, j: int,
+                          kernel_size: int = 3) -> float:
+    """
+    Manually compute the median for a specific position.
+    Useful for verifying filter results.
+
+    Parameters
+    ----------
+    matrix : np.ndarray
+        Input matrix.
+    i : int
+        Row coordinate of the center point.
+    j : int
+        Column coordinate of the center point.
+    kernel_size : int, optional
+        Kernel size (default is 3).
+
+    Returns
+    -------
+    float
+        Manually computed median value.
+
+    Raises
+    ------
+    ValueError
+        If kernel_size is not odd.
+    """
+    if kernel_size % 2 == 0:
+        raise ValueError("kernel_size must be odd")
+
+    half = kernel_size // 2
+    h, w = matrix.shape
+
+    # Extract neighborhood (with reflect padding for border handling)
+    neighborhood = []
+    for di in range(-half, half + 1):
+        for dj in range(-half, half + 1):
+            # Compute coordinates with reflect padding
+            ni = i + di
+            nj = j + dj
+
+            # Apply reflect padding if outside borders
+            if ni < 0:
+                ni = -ni - 1
+            elif ni >= h:
+                ni = 2 * h - ni - 1
+
+            if nj < 0:
+                nj = -nj - 1
+            elif nj >= w:
+                nj = 2 * w - nj - 1
+
+            neighborhood.append(matrix[ni, nj])
+
+    # Compute median
+    return float(np.median(neighborhood))
+
+
+def verify_median_filter(matrix: np.ndarray, kernel_size: int = 3,
+                         positions: list | None = None) -> tuple[bool, dict]:
+    """
+    Verify that the median filter works correctly by comparing with manual
+    computation.
+
+    Parameters
+    ----------
+    matrix : np.ndarray
+        Input matrix.
+    kernel_size : int, optional
+        Kernel size (default is 3).
+    positions : list of tuple of (int, int) or None, optional
+        List of positions [(i1, j1), ...] to verify. If None, verifies all
+        positions (default is None).
+
+    Returns
+    -------
+    tuple of (bool, dict)
+        A tuple ``(all_correct, detailed_results)`` where ``all_correct`` is
+        True if all positions match, and ``detailed_results`` is a dictionary
+        with per-position comparison data.
+    """
+    if positions is None:
+        # Verify all positions
+        h, w = matrix.shape
+        positions = [(i, j) for i in range(h) for j in range(w)]
+
+    # Apply filter
+    filter_result = apply_median_filter(matrix, kernel_size)
+
+    results = {}
+    all_correct = True
+
+    for i, j in positions:
+        # Compute median manually
+        manual = compute_manual_median(matrix, i, j, kernel_size)
+        filtered = filter_result[i, j]
+
+        correct = np.isclose(manual, filtered, rtol=1e-7)
+
+        results[(i, j)] = {
+            'manual': manual,
+            'filtered': filtered,
+            'correct': correct,
+            'difference': abs(manual - filtered)
+        }
+
+        if not correct:
+            all_correct = False
+
+    return all_correct, results
+
+def accumulate_histograms(input_dir: str, labels_dir: str, n_clusters: int,
+                          component: str = 'L', bins: int = 40,
+                          use_sampling: bool = False,
+                          sampling_fraction: float = 0.25) -> tuple[dict, tuple]:
+    """
+    Accumulate histograms per cluster for the chosen component ('L', 'a', 'b').
+
+    Parameters
+    ----------
+    input_dir : str
+        Folder with .npy images in LAB format.
+    labels_dir : str
+        Folder with K-means label files.
+    n_clusters : int
+        Number of detected clusters.
+    component : str, optional
+        Component to use: ``'L'``, ``'a'``, or ``'b'`` (default is ``'L'``).
+    bins : int, optional
+        Number of bins for the histogram (default is 40).
+    use_sampling : bool, optional
+        If True, use random sampling to speed up processing (default is False).
+    sampling_fraction : float, optional
+        Fraction of pixels to sample if ``use_sampling`` is True
+        (default is 0.25).
+
+    Returns
+    -------
+    tuple of (dict, tuple)
+        A tuple ``(accumulators, range)`` where ``accumulators`` is a dict
+        with histograms per cluster and ``range`` is a tuple
+        ``(range_min, range_max)`` of the range used.
+    """
+    # Prepare accumulators
+    accumulators = {}
+
+    # Fixed range for Lab
+    if component == 'L':
+        range_min, range_max = 0.0, 100.0
+    else:  # 'a' or 'b'
+        range_min, range_max = -128.0, 127.0
+
+    comp_idx = {'L': 0, 'a': 1, 'b': 2}[component]
+
+    # Get label files
+    label_files = [f for f in os.listdir(labels_dir)
+                   if f.endswith('_labels.npy')]
+
+    for file in label_files:
+        base = file.replace("_labels.npy", "")
+        label_path = os.path.join(labels_dir, file)
+        image_path = os.path.join(input_dir, f"{base}.npy")
+
+        if not os.path.exists(image_path):
+            continue
+
+        labels = np.load(label_path)
+        lab = np.load(image_path)
+
+        # Extract values from the selected component
+        vals = lab[:, :, comp_idx].flatten()
+        labs_flat = labels.flatten()
+
+        # Apply sampling if enabled
+        if use_sampling:
+            total = vals.size
+            mask = np.random.choice([True, False], size=total,
+                                    p=[sampling_fraction, 1 - sampling_fraction])
+            vals = vals[mask]
+            labs_flat = labs_flat[mask]
+
+        # Accumulate histograms per cluster
+        for cid in range(n_clusters):
+            maskc = (labs_flat == cid)
+            if np.any(maskc):
+                counts, _ = np.histogram(vals[maskc], bins=bins,
+                                         range=(range_min, range_max))
+                if cid not in accumulators:
+                    accumulators[cid] = np.zeros(bins, dtype=np.float64)
+                accumulators[cid] += counts
+
+    # Combine clusters 3 and 4 if they exist (for the specific malaria case)
+    if n_clusters >= 5 and 3 in accumulators and 4 in accumulators:
+        accumulators[3] = accumulators[3] + accumulators[4]
+        del accumulators[4]
+
+    return accumulators, (range_min, range_max)
+
+
+def compute_noi(hist1: np.ndarray, hist2: np.ndarray,
+                range_values: tuple, bins: int = 40) -> float:
+    """
+    Compute the NOI (overlap area) between two accumulated histograms.
+
+    Parameters
+    ----------
+    hist1 : np.ndarray
+        Histogram of the first cluster.
+    hist2 : np.ndarray
+        Histogram of the second cluster.
+    range_values : tuple of (float, float)
+        Tuple ``(range_min, range_max)`` of the histogram range.
+    bins : int, optional
+        Number of histogram bins (default is 40).
+
+    Returns
+    -------
+    float
+        NOI value between 0 and 1.
+    """
+    range_min, range_max = range_values
+    bin_width = (range_max - range_min) / bins
+
+    # Normalize to probability densities
+    area1 = hist1.sum()
+    area2 = hist2.sum()
+
+    if area1 == 0 or area2 == 0:
+        return 0.0
+
+    p1 = hist1 / (area1 * bin_width)
+    p2 = hist2 / (area2 * bin_width)
+
+    # Compute overlap area
+    overlap = np.sum(np.minimum(p1, p2)) * bin_width
+    return float(overlap)
+
+
+def simulate_distributions(mu1: float, sigma1: float, mu2: float, sigma2: float,
+                           bins: int = 40, n_samples: int = 10000) -> tuple:
+    """
+    Simulate two normal distributions and compute the NOI.
+    Useful for unit tests.
+
+    Parameters
+    ----------
+    mu1 : float
+        Mean of the first distribution.
+    sigma1 : float
+        Standard deviation of the first distribution.
+    mu2 : float
+        Mean of the second distribution.
+    sigma2 : float
+        Standard deviation of the second distribution.
+    bins : int, optional
+        Number of bins (default is 40).
+    n_samples : int, optional
+        Number of samples to generate (default is 10000).
+
+    Returns
+    -------
+    tuple of (np.ndarray, np.ndarray, tuple, float)
+        A tuple ``(hist1, hist2, range, computed_noi)``.
+    """
+    range_min, range_max = 0.0, 100.0  # For L component
+
+    # Generate samples
+    samples1 = np.clip(np.random.normal(mu1, sigma1, n_samples),
+                       range_min, range_max)
+    samples2 = np.clip(np.random.normal(mu2, sigma2, n_samples),
+                       range_min, range_max)
+
+    # Create histograms
+    hist1, _ = np.histogram(samples1, bins=bins, range=(range_min, range_max))
+    hist2, _ = np.histogram(samples2, bins=bins, range=(range_min, range_max))
+
+    # Compute NOI
+    noi = compute_noi(hist1, hist2, (range_min, range_max), bins=bins)
+
+    return hist1, hist2, (range_min, range_max), noi
+
+
+def analytical_noi_gaussians(mu1: float, sigma1: float, mu2: float, sigma2: float,
+                             range_min: float = 0.0, range_max: float = 100.0,
+                             n_points: int = 10000) -> float:
+    """
+    Analytically compute the NOI for two normal distributions.
+
+    Parameters
+    ----------
+    mu1 : float
+        Mean of the first distribution.
+    sigma1 : float
+        Standard deviation of the first distribution.
+    mu2 : float
+        Mean of the second distribution.
+    sigma2 : float
+        Standard deviation of the second distribution.
+    range_min : float, optional
+        Minimum value of the range (default is 0.0).
+    range_max : float, optional
+        Maximum value of the range (default is 100.0).
+    n_points : int, optional
+        Number of points for numerical integration (default is 10000).
+
+    Returns
+    -------
+    float
+        Analytically computed NOI.
+    """
+    # Create grid for integration
+    x = np.linspace(max(mu1 - 4 * sigma1, mu2 - 4 * sigma2, range_min),
+                    min(mu1 + 4 * sigma1, mu2 + 4 * sigma2, range_max), n_points)
+
+    # Check that there are points in the range
+    if len(x) == 0:
+        return 0.0
+
+    # Normal PDFs
+    pdf1 = (1 / (sigma1 * np.sqrt(2 * np.pi))) * np.exp(-0.5 * ((x - mu1) / sigma1) ** 2)
+    pdf2 = (1 / (sigma2 * np.sqrt(2 * np.pi))) * np.exp(-0.5 * ((x - mu2) / sigma2) ** 2)
+
+    # Normalize within the range
+    mask = (x >= range_min) & (x <= range_max)
+    if not np.any(mask):
+        return 0.0
+
+    pdf1 = pdf1[mask]
+    pdf2 = pdf2[mask]
+    x = x[mask]
+
+    # Normalize to area = 1 within the range
+    pdf1 = pdf1 / np.trapz(pdf1, x)
+    pdf2 = pdf2 / np.trapz(pdf2, x)
+
+    # Compute NOI
+    analytical_noi = np.trapz(np.minimum(pdf1, pdf2), x)
+    return float(analytical_noi)

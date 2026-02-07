@@ -1,4 +1,7 @@
 import io
+import pytest
+import os
+import shutil
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -10,37 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 
-from cie_utils import (
-    blur_img,
-    clahe_img,
-    classifier_model,
-    create_rgb_spectrum,
-    display_2d_scatter_plot,
-    display_3d_scatter_plot,
-    display_hist,
-    display_images,
-    display_plot,
-    enter_str_input,
-    extract_segmentation,
-    extract_segmentation_main,
-    false_color_scale,
-    get_csv_data,
-    get_csv_data_from_images,
-    get_pdf,
-    hsv_to_rgb,
-    min_max,
-    mix_images,
-    normalize_img,
-    pca_img,
-    plot_rgb_3d,
-    rm_bg,
-    rm_bg2channel,
-    sd_by_elem,
-    sd_by_px,
-    sort_classifier_results,
-    std4elem,
-    transform_img,
-)
+from cie_utils import *
 
 matplotlib.use("Agg")
 # --- Test Functions ---
@@ -928,5 +901,784 @@ def test_transform_img():
             expected_original_transformed_if_bg.reshape(-1, 3).astype(np.float32),
         )
 
+def test_find_intersections_basic():
+    """Test: Find intersections between two straight lines."""
+    # Line 1: y = x
+    x1 = np.array([0, 10])
+    y1 = np.array([0, 10])
+
+    # Line 2: y = 10 - x
+    x2 = np.array([0, 10])
+    y2 = np.array([10, 0])
+
+    intersections = find_intersections(x1, y1, x2, y2)
+
+    # They should intersect at x=5, y=5
+    assert len(intersections) == 1, f"Expected 1 intersection, found {len(intersections)}"
+
+    x_int, y_int = intersections[0]
+    assert np.isclose(x_int, 5.0, atol=0.1), f"Expected x ~5.0, got {x_int}"
+    assert np.isclose(y_int, 5.0, atol=0.1), f"Expected y ~5.0, got {y_int}"
+
+
+def test_find_intersections_no_overlap():
+    """Test: Curves that do not intersect."""
+    x1 = np.array([0, 5])
+    y1 = np.array([0, 5])
+
+    x2 = np.array([10, 15])
+    y2 = np.array([10, 15])
+
+    intersections = find_intersections(x1, y1, x2, y2)
+
+    assert len(intersections) == 0, f"Expected 0 intersections, found {len(intersections)}"
+
+
+def test_find_intersections_multiple():
+    """Test: Find multiple intersections."""
+    # Sine function
+    x1 = np.linspace(0, 4 * np.pi, 100)
+    y1 = np.sin(x1)
+
+    # Horizontal line at y=0.5
+    x2 = np.array([0, 4 * np.pi])
+    y2 = np.array([0.5, 0.5])
+
+    intersections = find_intersections(x1, y1, x2, y2)
+
+    # Sine should cross y=0.5 multiple times between 0 and 4*pi
+    assert len(intersections) >= 2, f"Expected at least 2 intersections, found {len(intersections)}"
+
+
+def test_filter_intersections_for_console():
+    """Test: Filter nearby intersections."""
+    # Create nearby intersections
+    intersections = [
+        (1.0, 2.0),
+        (1.2, 2.1),  # Very close to the first (distance 0.2)
+        (3.0, 4.0),
+        (3.1, 4.1),  # Very close to the third (distance 0.1)
+        (6.0, 7.0)   # Far away
+    ]
+
+    filtered = filter_intersections_for_console(intersections, distance_threshold=0.5)
+
+    # Only 3 should remain (first, third, and fifth)
+    assert len(filtered) == 3, f"Expected 3 filtered intersections, found {len(filtered)}"
+
+    # Verify the correct ones are kept
+    x_vals = [x for x, _ in filtered]
+    assert 1.0 in x_vals, "First intersection should be present"
+    assert 3.0 in x_vals, "Third intersection should be present"
+    assert 6.0 in x_vals, "Fifth intersection should be present"
+
+
+def test_filter_intersections_for_console_empty():
+    """Test: Filter an empty list of intersections."""
+    filtered = filter_intersections_for_console([])
+    assert len(filtered) == 0, "Empty list should return empty list"
+
+    filtered = filter_intersections_for_console([], distance_threshold=2.0)
+    assert len(filtered) == 0, "Empty list with threshold should return empty list"
+
+
+def test_detect_number_of_clusters():
+    """Test: Automatic detection of the number of clusters."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Create a test label file
+        test_labels = np.array([[0, 1, 2], [1, 2, 0], [2, 0, 1]])
+        labels_path = os.path.join(temp_dir, "test_labels.npy")
+        np.save(labels_path, test_labels)
+
+        # Create file with the correct extension
+        final_path = os.path.join(temp_dir, "image_labels.npy")
+        shutil.move(labels_path, final_path)
+
+        # Detect number of clusters
+        n_clusters = detect_number_of_clusters(temp_dir)
+
+        # Labels have values 0, 1, 2 -> valid clusters: 1, 2 -> 2 clusters
+        assert n_clusters == 2, f"Expected 2 clusters, detected {n_clusters}"
+
+
+def test_detect_number_of_clusters_no_files():
+    """Test: Detection when there are no files."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Empty directory
+        n_clusters = detect_number_of_clusters(temp_dir)
+
+        # Should return 3 by default
+        assert n_clusters == 3, f"Without files should return 3, returned {n_clusters}"
+
+
+def test_combine_red_blood_cell_clusters():
+    """Test: Combination of clusters 3 and 4."""
+    # Create test data
+    data = {
+        1: {"L": [1, 2, 3], "a": [10, 11, 12], "b": [20, 21, 22]},
+        2: {"L": [4, 5, 6], "a": [13, 14, 15], "b": [23, 24, 25]},
+        3: {"L": [7, 8], "a": [16, 17], "b": [26, 27]},
+        4: {"L": [9, 10], "a": [18, 19], "b": [28, 29]}
+    }
+
+    n_clusters = 4
+
+    # Combine clusters
+    combined_data, new_n = combine_red_blood_cell_clusters(data, n_clusters)
+
+    # Verify results
+    assert new_n == 3, f"Expected 3 clusters after combining, got {new_n}"
+    assert 4 not in combined_data, "Cluster 4 should have been removed"
+    assert len(combined_data[3]["L"]) == 4, "Cluster 3 should have 4 elements in L"
+    assert len(combined_data[3]["a"]) == 4, "Cluster 3 should have 4 elements in a"
+    assert len(combined_data[3]["b"]) == 4, "Cluster 3 should have 4 elements in b"
+
+
+def test_combine_red_blood_cell_clusters_no_combine():
+    """Test: Do not combine when there are fewer than 4 clusters."""
+    data = {
+        1: {"L": [1, 2], "a": [10, 11], "b": [20, 21]},
+        2: {"L": [3, 4], "a": [12, 13], "b": [22, 23]}
+    }
+
+    n_clusters = 2
+
+    combined_data, new_n = combine_red_blood_cell_clusters(data, n_clusters)
+
+    # Nothing should change
+    assert new_n == 2, f"Expected 2 clusters, got {new_n}"
+    assert 1 in combined_data, "Cluster 1 should exist"
+    assert 2 in combined_data, "Cluster 2 should exist"
+
+
+def test_get_automatic_names_and_colors():
+    """Test: Automatic generation of names and colors."""
+    # For 2 clusters
+    names_2, colors_2 = get_automatic_names_and_colors(2)
+
+    assert len(names_2) == 2, f"Expected 2 names, got {len(names_2)}"
+    assert len(colors_2) == 2, f"Expected 2 colors, got {len(colors_2)}"
+    assert names_2[1] == "Chromatin", f"Cluster 1 name incorrect: {names_2[1]}"
+    assert names_2[2] == "Cytoplasm", f"Cluster 2 name incorrect: {names_2[2]}"
+
+    # For 5 clusters (more than predefined)
+    names_5, colors_5 = get_automatic_names_and_colors(5)
+
+    assert len(names_5) == 5, f"Expected 5 names, got {len(names_5)}"
+    assert len(colors_5) == 5, f"Expected 5 colors, got {len(colors_5)}"
+    assert names_5[5] == "Other", f"Cluster 5 name incorrect: {names_5[5]}"
+
+    # For 7 clusters (outside predefined)
+    names_7, colors_7 = get_automatic_names_and_colors(7)
+
+    assert len(names_7) == 7, f"Expected 7 names, got {len(names_7)}"
+    assert names_7[7] == "Cluster 7", f"Cluster 7 name incorrect: {names_7[7]}"
+
+
+def test_compute_histograms():
+    """Test: Smoothed histogram computation."""
+    # Create test data
+    data = {
+        1: {
+            "L": np.random.normal(50, 10, 1000).tolist(),
+            "a": np.random.normal(0, 5, 1000).tolist(),
+            "b": np.random.normal(0, 5, 1000).tolist()
+        },
+        2: {
+            "L": np.random.normal(70, 8, 800).tolist(),
+            "a": np.random.normal(10, 3, 800).tolist(),
+            "b": np.random.normal(5, 4, 800).tolist()
+        }
+    }
+
+    n_clusters = 2
+
+    # Compute histograms
+    curves = compute_histograms(data, n_clusters, bins=20)
+
+    # Verify structure
+    assert 'L' in curves, "Should have component L"
+    assert 'a' in curves, "Should have component a"
+    assert 'b' in curves, "Should have component b"
+
+    # Verify there is data for each cluster
+    for comp in ['L', 'a', 'b']:
+        assert 1 in curves[comp], f"Should have data for cluster 1 in {comp}"
+        assert 2 in curves[comp], f"Should have data for cluster 2 in {comp}"
+
+        # Verify each entry is a tuple (x, y)
+        x1, y1 = curves[comp][1]
+        assert len(x1) > 0, f"x should not be empty for cluster 1 in {comp}"
+        assert len(y1) > 0, f"y should not be empty for cluster 1 in {comp}"
+
+        assert len(x1) == len(y1), f"x and y must have the same length for cluster 1 in {comp}"
+
+
+def test_compute_all_intersections():
+    """Test: Intersection computation between cluster pairs."""
+    # Create test smoothed curves that actually intersect
+    x = np.linspace(0, 10, 50)
+    smoothed_curves = {
+        'L': {
+            1: (x, 5 + 5 * np.sin(x)),         # Sine wave oscillating around 5
+            2: (x, np.full_like(x, 5.0))        # Horizontal line at y=5
+        },
+        'a': {
+            1: (np.array([0, 10]), np.array([0, 10])),   # y = x (increasing)
+            2: (np.array([0, 10]), np.array([10, 0]))     # y = 10-x (decreasing)
+        },
+        'b': {
+            1: (np.array([0, 10]), np.array([0, 0])),     # Horizontal line at y=0
+            2: (np.array([0, 10]), np.array([5, 5]))       # Horizontal line at y=5
+        }
+    }
+
+    names = {1: "Cluster 1", 2: "Cluster 2"}
+
+    # Compute intersections (use smaller threshold for small x-range test data)
+    intersections = compute_all_intersections(smoothed_curves, names, distance_threshold=1.0)
+
+    # Verify structure
+    assert 'L' in intersections, "Should have intersections for L"
+    assert 'a' in intersections, "Should have intersections for a"
+    assert 'b' in intersections, "Should have intersections for b"
+
+    # For L and a there should be intersections, for b there should not
+    assert len(intersections['L']) > 0, "Should have intersections in L"
+    assert len(intersections['a']) > 0, "Should have intersections in a"
+    assert len(intersections['b']) == 0, "Should not have intersections in b (parallel lines)"
+
+
+def test_compute_all_intersections_no_data():
+    """Test: Intersection computation with no data."""
+    smoothed_curves = {'L': {}, 'a': {}, 'b': {}}
+    names = {}
+
+    intersections = compute_all_intersections(smoothed_curves, names)
+
+    for comp in ['L', 'a', 'b']:
+        assert len(intersections[comp]) == 0, f"Should not have intersections in {comp}"
+
+
+def create_complete_test_data(temp_dir: str, num_images: int = 3):
+    """
+    Create complete test data for testing.
+
+    Parameters
+    ----------
+    temp_dir : str
+        Temporary directory path.
+    num_images : int, optional
+        Number of test images to create (default is 3).
+
+    Returns
+    -------
+    tuple of (str, str)
+        Paths to the input directory and labels directory.
+    """
+    input_dir = os.path.join(temp_dir, "input")
+    labels_dir = os.path.join(temp_dir, "labels")
+
+    os.makedirs(input_dir)
+    os.makedirs(labels_dir)
+
+    for i in range(num_images):
+        # Create random LAB image
+        image = np.random.randint(0, 255, (10, 10, 3), dtype=np.uint8).astype(np.float32)
+
+        # Create labels with 3 clusters (0, 1, 2, 3)
+        labels = np.random.choice([0, 1, 2, 3], size=(10, 10))
+
+        # Save files
+        image_path = os.path.join(input_dir, f"image_{i}.npy")
+        labels_path = os.path.join(labels_dir, f"image_{i}_labels.npy")
+
+        np.save(image_path, image)
+        np.save(labels_path, labels)
+
+    return input_dir, labels_dir
+
+
+def test_analyze_lab_distributions_basic():
+    """Test: Basic LAB distribution analysis."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        input_dir, labels_dir = create_complete_test_data(temp_dir, num_images=2)
+
+        # Run analysis without plots
+        results = analyze_lab_distributions(
+            input_dir, labels_dir,
+            use_sampling=False,
+            show_plots=False,
+            bins=20
+        )
+
+        # Verify results
+        assert 'data' in results, "Results should contain 'data'"
+        assert 'n_clusters' in results, "Results should contain 'n_clusters'"
+        assert 'smoothed_curves' in results, "Results should contain 'smoothed_curves'"
+        assert 'intersections_by_component' in results, "Results should contain 'intersections_by_component'"
+
+        # Verify detected number of clusters
+        # Our labels have values 0, 1, 2, 3 -> valid clusters: 1, 2, 3
+        assert results['n_clusters'] == 3, f"Expected 3 clusters, got {results['n_clusters']}"
+
+        # Verify that images were processed
+        assert results['num_images_processed'] == 2, \
+            f"Expected 2 processed images, got {results['num_images_processed']}"
+
+
+def test_analyze_lab_distributions_with_sampling():
+    """Test: Analysis with random sampling."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        input_dir, labels_dir = create_complete_test_data(temp_dir, num_images=2)
+
+        # Run analysis with sampling
+        results = analyze_lab_distributions(
+            input_dir, labels_dir,
+            use_sampling=True,
+            sampling_fraction=0.5,
+            show_plots=False,
+            bins=20
+        )
+
+        # Verify that sampling was used
+        assert results['use_sampling'] == True, "Should indicate that sampling was used"
+        assert results['sampling_fraction'] == 0.5, f"Incorrect sampling fraction: {results['sampling_fraction']}"
+
+
+def test_analyze_lab_distributions_no_files():
+    """Test: Analysis with no files (should fail)."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Empty directory
+        with pytest.raises(ValueError, match="No label files found"):
+            analyze_lab_distributions(
+                temp_dir, temp_dir,
+                show_plots=False
+            )
+
+
+def test_analyze_lab_distributions_invalid_paths():
+    """Test: Analysis with invalid paths."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Create only images, no labels
+        input_dir = os.path.join(temp_dir, "input")
+        labels_dir = os.path.join(temp_dir, "labels")
+
+        os.makedirs(input_dir)
+
+        # Create an image without corresponding labels
+        image = np.random.randint(0, 255, (10, 10, 3), dtype=np.uint8).astype(np.float32)
+        np.save(os.path.join(input_dir, "image_0.npy"), image)
+
+        # labels_dir does not exist, so detect_number_of_clusters will warn
+        # and then analyze_lab_distributions will raise ValueError (no label files)
+        with pytest.warns(UserWarning, match="Labels directory does not exist"):
+            with pytest.raises(ValueError, match="No label files found"):
+                analyze_lab_distributions(
+                    input_dir, labels_dir,
+                    show_plots=False
+                )
+
+def test_median_filter_invalid_kernel():
+    """Test: kernel_size must be odd and positive."""
+    matrix = np.ones((5, 5))
+
+    # Even kernel_size should raise an error
+    with pytest.raises(ValueError, match="kernel_size must be odd"):
+        apply_median_filter(matrix, kernel_size=4)
+
+    # kernel_size <= 0 should raise an error
+    with pytest.raises(ValueError, match="kernel_size must be greater than 0"):
+        apply_median_filter(matrix, kernel_size=0)
+
+    with pytest.raises(ValueError, match="kernel_size must be greater than 0"):
+        apply_median_filter(matrix, kernel_size=-1)
+
+
+def test_median_filter_ordered_matrix():
+    """Test: Median filter on an ordered matrix with 3x3 kernel."""
+    matrix = create_test_matrix(5, 'ordered')
+
+    # Apply filter
+    result = apply_median_filter(matrix, kernel_size=3)
+
+    # Verify center position (2,2)
+    # 3x3 neighborhood centered at (2,2): [[6,7,8],[11,12,13],[16,17,18]]
+    # Median = 12
+    assert np.isclose(result[2, 2], 12.0), \
+        f"Position (2,2) expected 12.0, got {result[2, 2]}"
+
+    # Verify position (1,1)
+    # Neighborhood: [[0,1,2],[5,6,7],[10,11,12]], Median = 6
+    assert np.isclose(result[1, 1], 6.0), \
+        f"Position (1,1) expected 6.0, got {result[1, 1]}"
+
+
+def test_median_filter_random_matrix():
+    """Test: Median filter on a random matrix."""
+    np.random.seed(42)
+    matrix = create_test_matrix(7, 'random')
+
+    # Apply filter with 3x3 kernel
+    result = apply_median_filter(matrix, kernel_size=3)
+
+    # Verify some positions manually
+    positions_to_verify = [(3, 3), (0, 0), (6, 6), (2, 5)]
+
+    for i, j in positions_to_verify:
+        manual = compute_manual_median(matrix, i, j, kernel_size=3)
+        filtered = result[i, j]
+
+        assert np.isclose(manual, filtered, rtol=1e-7), \
+            f"Position ({i},{j}): manual={manual}, filtered={filtered}"
+
+
+def test_median_filter_kernel_5x5():
+    """Test: Median filter with 5x5 kernel."""
+    matrix = create_test_matrix(10, 'ordered')
+
+    # Apply filter with 5x5 kernel
+    result = apply_median_filter(matrix, kernel_size=5)
+
+    # Verify position (5,5) - center of the matrix
+    # Ordered 10x10 matrix, value at (5,5) = 55
+    # 5x5 neighborhood: values 33-43-53-63-73, 34-44-54-64-74, etc.
+    # All values: from 33 to 77, Median = 55
+    assert np.isclose(result[5, 5], 55.0), \
+        f"Position (5,5) with 5x5 kernel expected 55.0, got {result[5, 5]}"
+
+    # Verify with manual computation
+    manual = compute_manual_median(matrix, 5, 5, kernel_size=5)
+    assert np.isclose(result[5, 5], manual), \
+        f"Discrepancy at (5,5): filtered={result[5, 5]}, manual={manual}"
+
+
+def test_median_filter_rgb():
+    """Test: Median filter for RGB images."""
+    # Create 5x5x3 RGB image
+    np.random.seed(123)
+    channel_r = create_test_matrix(5, 'random')
+    channel_g = create_test_matrix(5, 'ordered')
+    channel_b = create_test_matrix(5, 'stepped')
+
+    rgb_image = np.stack([channel_r, channel_g, channel_b], axis=-1)
+
+    # Apply filter
+    result = apply_median_filter_rgb(rgb_image, kernel_size=3)
+
+    # Verify that each channel was processed independently
+    result_r = apply_median_filter(channel_r, kernel_size=3)
+    result_g = apply_median_filter(channel_g, kernel_size=3)
+    result_b = apply_median_filter(channel_b, kernel_size=3)
+
+    assert np.allclose(result[:, :, 0], result_r), \
+        "R channel does not match individual processing"
+    assert np.allclose(result[:, :, 1], result_g), \
+        "G channel does not match individual processing"
+    assert np.allclose(result[:, :, 2], result_b), \
+        "B channel does not match individual processing"
+
+
+def test_median_filter_rgb_invalid():
+    """Test: Error when image is not RGB."""
+    # 2-channel image
+    image_2channels = np.ones((5, 5, 2))
+
+    with pytest.raises(ValueError, match="Image must have 3 channels"):
+        apply_median_filter_rgb(image_2channels)
+
+    # 4-channel image
+    image_4channels = np.ones((5, 5, 4))
+
+    with pytest.raises(ValueError, match="Image must have 3 channels"):
+        apply_median_filter_rgb(image_4channels)
+
+
+def test_median_filter_edges():
+    """Test: Filter behavior at edges."""
+    matrix = create_test_matrix(7, 'edges')
+
+    # Apply filter
+    result = apply_median_filter(matrix, kernel_size=3)
+
+    # Verify that edges are preserved (median filter with reflect padding)
+    # Corner (0,0): reflected neighborhood will have high values (edges)
+    manual_corner = compute_manual_median(matrix, 0, 0, kernel_size=3)
+    filtered_corner = result[0, 0]
+
+    assert np.isclose(manual_corner, filtered_corner, rtol=1e-7), \
+        f"Corner (0,0): manual={manual_corner}, filtered={filtered_corner}"
+
+
+def test_compute_manual_median():
+    """Test: Manual median computation."""
+    matrix = np.array([
+        [1, 2, 3, 4, 5],
+        [6, 7, 8, 9, 10],
+        [11, 12, 13, 14, 15],
+        [16, 17, 18, 19, 20],
+        [21, 22, 23, 24, 25]
+    ], dtype=np.float32)
+
+    # Center position (2,2) with 3x3 kernel
+    # Neighborhood: [[7,8,9],[12,13,14],[17,18,19]]
+    # Values: [7,8,9,12,13,14,17,18,19], Median = 13
+    manual = compute_manual_median(matrix, 2, 2, kernel_size=3)
+    assert manual == 13.0, f"Manual median expected 13.0, got {manual}"
+
+    # Corner (0,0) with 3x3 kernel (with reflect padding)
+    # Reflected neighborhood: [[1,1,2],[1,1,2],[6,6,7]]
+    # Values sorted: [1,1,1,1,2,2,6,6,7], Median = 2
+    manual_corner = compute_manual_median(matrix, 0, 0, kernel_size=3)
+    assert manual_corner == 2.0, f"Corner (0,0) expected 2.0, got {manual_corner}"
+
+
+def test_verify_median_filter():
+    """Test: Complete verification function."""
+    matrix = create_test_matrix(6, 'random')
+
+    # Verify all positions
+    all_correct, results = verify_median_filter(
+        matrix, kernel_size=3, positions=None
+    )
+
+    assert all_correct, "Not all positions match"
+
+    # Verify some specific positions
+    positions = [(0, 0), (3, 3), (5, 5)]
+    all_correct, results = verify_median_filter(
+        matrix, kernel_size=3, positions=positions
+    )
+
+    assert all_correct, f"Specific positions do not match: {results}"
+
+
+def test_process_npy_images():
+    """Test: Processing .npy files."""
+    # Create temporary folder for tests
+    with tempfile.TemporaryDirectory() as temp_dir:
+        input_dir = os.path.join(temp_dir, "input")
+        output_dir = os.path.join(temp_dir, "output")
+
+        os.makedirs(input_dir)
+
+        # Create some test images
+        for i in range(3):
+            # 10x10 RGB image
+            image = np.random.randint(0, 255, (10, 10, 3), dtype=np.uint8)
+            path = os.path.join(input_dir, f"image_{i}.npy")
+            np.save(path, image)
+
+        # Process images
+        process_npy_images(input_dir, output_dir, kernel_size=3, process_rgb=True)
+
+        # Verify that output files were created
+        output_files = os.listdir(output_dir)
+        assert len(output_files) == 3, \
+            f"Expected 3 output files, found {len(output_files)}"
+
+        # Verify that files contain filtered images
+        for filename in output_files:
+            path = os.path.join(output_dir, filename)
+            filtered_image = np.load(path)
+            assert filtered_image.shape == (10, 10, 3), \
+                f"Image {filename} does not have the expected shape"
+
+
+def test_process_npy_images_errors():
+    """Test: Error handling in processing."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Input folder does not exist
+        with pytest.raises(ValueError, match="Input folder does not exist"):
+            process_npy_images(
+                "/nonexistent/path",
+                os.path.join(temp_dir, "output"),
+                kernel_size=3
+            )
+
+        # Create input folder
+        input_dir = os.path.join(temp_dir, "input")
+        os.makedirs(input_dir)
+
+        # Invalid kernel_size
+        with pytest.raises(ValueError, match="kernel_size must be a positive odd number"):
+            process_npy_images(input_dir, temp_dir, kernel_size=4)
+
+
+def test_create_test_matrix():
+    """Test: Test matrix creation."""
+    # Ordered matrix
+    ordered = create_test_matrix(3, 'ordered')
+    expected = np.array([[0, 1, 2], [3, 4, 5], [6, 7, 8]], dtype=np.float32)
+    assert np.array_equal(ordered, expected), "Ordered matrix incorrect"
+
+    # Random matrix (same seed)
+    np.random.seed(42)
+    random1 = create_test_matrix(3, 'random')
+    np.random.seed(42)
+    random2 = create_test_matrix(3, 'random')
+    assert np.array_equal(random1, random2), "Random matrix not reproducible"
+
+    # Stepped matrix
+    stepped = create_test_matrix(3, 'stepped')
+    expected_stepped = np.array([[0, 1, 2], [1, 1, 2], [2, 2, 2]], dtype=np.float32)
+    assert np.array_equal(stepped, expected_stepped), "Stepped matrix incorrect"
+
+    # Invalid type
+    with pytest.raises(ValueError, match="Invalid matrix type"):
+        create_test_matrix(3, 'invalid')
+
+def test_compute_noi_identical():
+    """Test: Identical distributions should yield NOI = 1."""
+    bins = 40
+    range_min, range_max = 0.0, 100.0
+
+    # Create identical histograms
+    hist1 = np.ones(bins) * 100
+    hist2 = hist1.copy()
+
+    noi = compute_noi(hist1, hist2, (range_min, range_max), bins=bins)
+
+    assert np.isclose(noi, 1.0, rtol=1e-7), \
+        f"Identical distributions should give NOI=1, but got {noi}"
+
+
+def test_compute_noi_no_overlap():
+    """Test: Non-overlapping distributions should yield NOI ~ 0."""
+    bins = 40
+    range_min, range_max = 0.0, 100.0
+
+    # Non-overlapping histograms
+    hist1 = np.zeros(bins)
+    hist2 = np.zeros(bins)
+    hist1[:10] = 100   # Only first 10 bins
+    hist2[30:] = 100   # Only last 10 bins
+
+    noi = compute_noi(hist1, hist2, (range_min, range_max), bins=bins)
+
+    assert noi < 0.01, \
+        f"Non-overlapping distributions should give NOI~0, but got {noi}"
+
+
+def test_compute_noi_empty_histogram():
+    """Test: Empty histogram should yield NOI = 0."""
+    bins = 40
+    range_min, range_max = 0.0, 100.0
+
+    hist1 = np.ones(bins) * 100
+    hist2 = np.zeros(bins)  # Empty histogram
+
+    noi = compute_noi(hist1, hist2, (range_min, range_max), bins=bins)
+
+    assert noi == 0.0, \
+        f"Empty histogram should give NOI=0, but got {noi}"
+
+
+def test_compute_noi_normalization():
+    """Test: Verify that histograms are normalized correctly."""
+    bins = 40
+    range_min, range_max = 0.0, 100.0
+
+    # Histograms with different areas
+    hist1 = np.ones(bins) * 100  # Area = 100 * 40 = 4000
+    hist2 = np.ones(bins) * 50   # Area = 50 * 40 = 2000
+
+    noi = compute_noi(hist1, hist2, (range_min, range_max), bins=bins)
+
+    # Should give NOI = 1 after normalization
+    assert np.isclose(noi, 1.0, rtol=1e-7), \
+        f"Proportional histograms should give NOI=1, but got {noi}"
+
+
+def test_simulate_distributions():
+    """Test: Verify that simulation generates consistent results."""
+    np.random.seed(42)  # For reproducibility
+
+    mu1, sigma1 = 30.0, 5.0
+    mu2, sigma2 = 50.0, 7.0
+
+    hist1, hist2, range_values, simulated_noi = simulate_distributions(
+        mu1, sigma1, mu2, sigma2, bins=40, n_samples=10000
+    )
+
+    # Verify shapes
+    assert hist1.shape == (40,), f"hist1 shape: {hist1.shape}"
+    assert hist2.shape == (40,), f"hist2 shape: {hist2.shape}"
+
+    # Verify that NOI is in [0, 1]
+    assert 0.0 <= simulated_noi <= 1.0, \
+        f"NOI should be between 0 and 1, but got {simulated_noi}"
+
+    # Verify ranges
+    range_min, range_max = range_values
+    assert range_min == 0.0
+    assert range_max == 100.0
+
+
+def test_analytical_noi_gaussians():
+    """Test: Compare analytical NOI with expected values."""
+    # Case 1: Identical distributions
+    noi1 = analytical_noi_gaussians(50.0, 10.0, 50.0, 10.0)
+    assert np.isclose(noi1, 1.0, rtol=1e-5), \
+        f"Identical distributions: expected 1.0, got {noi1}"
+
+    # Case 2: Very separated distributions
+    noi2 = analytical_noi_gaussians(20.0, 2.0, 80.0, 2.0)
+    assert noi2 < 0.001, \
+        f"Separated distributions: expected <0.001, got {noi2}"
+
+    # Case 3: Distributions with moderate overlap
+    noi3 = analytical_noi_gaussians(40.0, 10.0, 60.0, 10.0)
+    assert 0.1 < noi3 < 0.5, \
+        f"Moderate overlap: expected between 0.1 and 0.5, got {noi3}"
+
+
+def test_consistency_simulation_analytical():
+    """Test: Compare simulation with analytical computation."""
+    np.random.seed(123)
+
+    mu1, sigma1 = 35.0, 8.0
+    mu2, sigma2 = 45.0, 9.0
+
+    # Simulation
+    hist1, hist2, range_values, simulated_noi = simulate_distributions(
+        mu1, sigma1, mu2, sigma2, bins=100, n_samples=50000
+    )
+
+    # Analytical
+    analytical_noi = analytical_noi_gaussians(
+        mu1, sigma1, mu2, sigma2, range_min=0.0, range_max=100.0, n_points=10000
+    )
+
+    # They should be similar (5% tolerance)
+    relative_difference = abs(simulated_noi - analytical_noi) / analytical_noi
+
+    assert relative_difference < 0.05, \
+        f"Difference too large: simulated={simulated_noi}, " \
+        f"analytical={analytical_noi}, difference={relative_difference * 100:.2f}%"
+
+
+def test_edge_values():
+    """Test: Behavior in edge cases."""
+    bins = 40
+    range_min, range_max = 0.0, 100.0
+
+    # Case: single non-empty bin in each histogram, no overlap
+    hist1 = np.zeros(bins)
+    hist2 = np.zeros(bins)
+    hist1[0] = 100    # Only first bin
+    hist2[-1] = 100   # Only last bin
+
+    noi = compute_noi(hist1, hist2, (range_min, range_max), bins=bins)
+
+    # NOI should be 0 (no bin overlap)
+    assert noi == 0.0, f"Opposite edges should give NOI=0, but got {noi}"
+
+    # Case: all bins have the same value
+    hist3 = np.full(bins, 50.0)
+    hist4 = np.full(bins, 50.0)
+    noi2 = compute_noi(hist3, hist4, (range_min, range_max), bins=bins)
+    assert np.isclose(noi2, 1.0, rtol=1e-7), \
+        f"Uniform distributions should give NOI=1, but got {noi2}"
 
 print("All test functions defined.")
