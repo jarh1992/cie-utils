@@ -2205,6 +2205,13 @@ def verify_median_filter(matrix: np.ndarray, kernel_size: int = 3,
 
     return all_correct, results
 
+"""
+Functions for Noise Overlap Index (NOI) computation and histogram accumulation.
+"""
+import numpy as np
+import os
+
+
 def accumulate_histograms(input_dir: str, labels_dir: str, n_clusters: int,
                           component: str = 'L', bins: int = 40,
                           use_sampling: bool = False,
@@ -2405,12 +2412,14 @@ def analytical_noi_gaussians(mu1: float, sigma1: float, mu2: float, sigma2: floa
         Analytically computed NOI.
     """
     # Create grid for integration
-    x = np.linspace(max(mu1 - 4 * sigma1, mu2 - 4 * sigma2, range_min),
-                    min(mu1 + 4 * sigma1, mu2 + 4 * sigma2, range_max), n_points)
+    x_start = max(mu1 - 4 * sigma1, mu2 - 4 * sigma2, range_min)
+    x_end = min(mu1 + 4 * sigma1, mu2 + 4 * sigma2, range_max)
 
-    # Check that there are points in the range
-    if len(x) == 0:
+    # No overlap between the distributions' relevant ranges
+    if x_start >= x_end:
         return 0.0
+
+    x = np.linspace(x_start, x_end, n_points)
 
     # Normal PDFs
     pdf1 = (1 / (sigma1 * np.sqrt(2 * np.pi))) * np.exp(-0.5 * ((x - mu1) / sigma1) ** 2)
