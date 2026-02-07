@@ -2426,9 +2426,9 @@ def analytical_noi_gaussians(mu1: float, sigma1: float, mu2: float, sigma2: floa
     x = x[mask]
 
     # Normalize to area = 1 within the range
-    pdf1 = pdf1 / np.trapz(pdf1, x)
-    pdf2 = pdf2 / np.trapz(pdf2, x)
+    pdf1 = pdf1 / np.trapezoid(pdf1, x)
+    pdf2 = pdf2 / np.trapezoid(pdf2, x)
 
     # Compute NOI
-    analytical_noi = np.trapz(np.minimum(pdf1, pdf2), x)
+    analytical_noi = np.trapezoid(np.minimum(pdf1, pdf2), x)
     return float(analytical_noi)
