@@ -228,6 +228,7 @@
 <span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">time</span><span class="w"> </span><span class="kn">import</span> <span class="n">time</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Any</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
 
 <span class="kn">import</span><span class="w"> </span><span class="nn">cv2</span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
@@ -236,11 +237,14 @@
 <span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">yaml</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">pytz</span><span class="w"> </span><span class="kn">import</span> <span class="n">timezone</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy.interpolate</span><span class="w"> </span><span class="kn">import</span> <span class="n">interp1d</span><span class="p">,</span> <span class="n">make_interp_spline</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy.ndimage</span><span class="w"> </span><span class="kn">import</span> <span class="n">median_filter</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">scipy.stats</span><span class="w"> </span><span class="kn">import</span> <span class="n">gaussian_kde</span><span class="p">,</span> <span class="n">iqr</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">skimage</span><span class="w"> </span><span class="kn">import</span> <span class="n">filters</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">skimage.color</span><span class="w"> </span><span class="kn">import</span> <span class="n">lab2lch</span><span class="p">,</span> <span class="n">lab2rgb</span><span class="p">,</span> <span class="n">rgb2lab</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.cluster</span><span class="w"> </span><span class="kn">import</span> <span class="n">AgglomerativeClustering</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.mixture</span><span class="w"> </span><span class="kn">import</span> <span class="n">GaussianMixture</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
 
 <span class="n">black_px</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">])</span>
 <span class="n">BASE_DIR</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">parent</span>
@@ -1665,6 +1669,1145 @@
     <span class="n">lab_image_eq</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">(</span><span class="n">lab_image_eq</span><span class="p">)</span>
 
     <span class="k">return</span> <span class="p">[</span><span class="n">blur_image</span><span class="p">,</span> <span class="n">rgb_image_eq</span><span class="p">,</span> <span class="n">lab_image_eq</span><span class="p">]</span></div>
+
+
+<div class="viewcode-block" id="find_intersections">
+<a class="viewcode-back" href="../index.html#cie_utils.find_intersections">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">find_intersections</span><span class="p">(</span><span class="n">x1</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">y1</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+                       <span class="n">x2</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">y2</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+                       <span class="n">distance_threshold</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">5.0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Find intersection points between two curves, ignoring nearby points.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    x1 : np.ndarray</span>
+<span class="sd">        X-coordinates of the first curve.</span>
+<span class="sd">    y1 : np.ndarray</span>
+<span class="sd">        Y-coordinates of the first curve.</span>
+<span class="sd">    x2 : np.ndarray</span>
+<span class="sd">        X-coordinates of the second curve.</span>
+<span class="sd">    y2 : np.ndarray</span>
+<span class="sd">        Y-coordinates of the second curve.</span>
+<span class="sd">    distance_threshold : float, optional</span>
+<span class="sd">        Minimum distance between intersections to consider them distinct</span>
+<span class="sd">        (default is 5.0).</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    list of tuple of (float, float)</span>
+<span class="sd">        List of (x, y) tuples with the intersections found.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Create interpolated functions for both curves</span>
+    <span class="n">f1</span> <span class="o">=</span> <span class="n">interp1d</span><span class="p">(</span><span class="n">x1</span><span class="p">,</span> <span class="n">y1</span><span class="p">,</span> <span class="n">kind</span><span class="o">=</span><span class="s1">&#39;linear&#39;</span><span class="p">,</span> <span class="n">bounds_error</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">fill_value</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">f2</span> <span class="o">=</span> <span class="n">interp1d</span><span class="p">(</span><span class="n">x2</span><span class="p">,</span> <span class="n">y2</span><span class="p">,</span> <span class="n">kind</span><span class="o">=</span><span class="s1">&#39;linear&#39;</span><span class="p">,</span> <span class="n">bounds_error</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">fill_value</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+    <span class="c1"># Create a common finer grid for greater precision</span>
+    <span class="n">x_min</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">x1</span><span class="o">.</span><span class="n">min</span><span class="p">(),</span> <span class="n">x2</span><span class="o">.</span><span class="n">min</span><span class="p">())</span>
+    <span class="n">x_max</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">x1</span><span class="o">.</span><span class="n">max</span><span class="p">(),</span> <span class="n">x2</span><span class="o">.</span><span class="n">max</span><span class="p">())</span>
+
+    <span class="k">if</span> <span class="n">x_min</span> <span class="o">&gt;=</span> <span class="n">x_max</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[]</span>
+
+    <span class="n">x_common</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="n">x_min</span><span class="p">,</span> <span class="n">x_max</span><span class="p">,</span> <span class="mi">10000</span><span class="p">)</span>
+
+    <span class="c1"># Compute the difference between the curves</span>
+    <span class="n">diff</span> <span class="o">=</span> <span class="n">f1</span><span class="p">(</span><span class="n">x_common</span><span class="p">)</span> <span class="o">-</span> <span class="n">f2</span><span class="p">(</span><span class="n">x_common</span><span class="p">)</span>
+
+    <span class="c1"># Find where the difference changes sign (intersections)</span>
+    <span class="n">intersections</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">diff</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">diff</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">*</span> <span class="n">diff</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>  <span class="c1"># Sign change</span>
+            <span class="c1"># Linear interpolation to find the exact point</span>
+            <span class="k">if</span> <span class="n">diff</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">diff</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">x_int</span> <span class="o">=</span> <span class="n">x_common</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">-</span> <span class="n">diff</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">*</span> <span class="p">(</span><span class="n">x_common</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">x_common</span><span class="p">[</span><span class="n">i</span><span class="p">])</span> <span class="o">/</span> <span class="p">(</span><span class="n">diff</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">diff</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">x_int</span> <span class="o">=</span> <span class="n">x_common</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+
+            <span class="c1"># Filter points too close to existing intersections</span>
+            <span class="n">add_point</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="k">for</span> <span class="n">existing_x</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">intersections</span><span class="p">:</span>
+                <span class="k">if</span> <span class="nb">abs</span><span class="p">(</span><span class="n">x_int</span> <span class="o">-</span> <span class="n">existing_x</span><span class="p">)</span> <span class="o">&lt;</span> <span class="n">distance_threshold</span><span class="p">:</span>
+                    <span class="n">add_point</span> <span class="o">=</span> <span class="kc">False</span>
+                    <span class="k">break</span>
+
+            <span class="k">if</span> <span class="n">add_point</span><span class="p">:</span>
+                <span class="n">intersections</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">x_int</span><span class="p">,</span> <span class="n">f1</span><span class="p">(</span><span class="n">x_int</span><span class="p">)))</span>
+
+    <span class="k">return</span> <span class="n">intersections</span></div>
+
+
+
+<div class="viewcode-block" id="filter_intersections_for_console">
+<a class="viewcode-back" href="../index.html#cie_utils.filter_intersections_for_console">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">filter_intersections_for_console</span><span class="p">(</span><span class="n">intersections</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]],</span>
+                                     <span class="n">distance_threshold</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Filter intersections for console output, removing nearby points.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    intersections : list of tuple of (float, float)</span>
+<span class="sd">        List of (x, y) intersections.</span>
+<span class="sd">    distance_threshold : float, optional</span>
+<span class="sd">        Minimum distance between points to keep them separate (default is 1.0).</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    list of tuple of (float, float)</span>
+<span class="sd">        Filtered list of intersections.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">intersections</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[]</span>
+
+    <span class="c1"># Sort by X value</span>
+    <span class="n">sorted_intersections</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">intersections</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">filtered_intersections</span> <span class="o">=</span> <span class="p">[</span><span class="n">sorted_intersections</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span>
+
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">sorted_intersections</span><span class="p">)):</span>
+        <span class="n">x_current</span><span class="p">,</span> <span class="n">y_current</span> <span class="o">=</span> <span class="n">sorted_intersections</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+        <span class="n">x_previous</span><span class="p">,</span> <span class="n">y_previous</span> <span class="o">=</span> <span class="n">filtered_intersections</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+
+        <span class="c1"># Check distance with the last added intersection</span>
+        <span class="k">if</span> <span class="nb">abs</span><span class="p">(</span><span class="n">x_current</span> <span class="o">-</span> <span class="n">x_previous</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="n">distance_threshold</span><span class="p">:</span>
+            <span class="n">filtered_intersections</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">x_current</span><span class="p">,</span> <span class="n">y_current</span><span class="p">))</span>
+
+    <span class="k">return</span> <span class="n">filtered_intersections</span></div>
+
+
+
+<div class="viewcode-block" id="detect_number_of_clusters">
+<a class="viewcode-back" href="../index.html#cie_utils.detect_number_of_clusters">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">detect_number_of_clusters</span><span class="p">(</span><span class="n">labels_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Automatically detect the number of clusters used.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    labels_dir : str</span>
+<span class="sd">        Directory containing label files.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    int</span>
+<span class="sd">        Number of clusters detected.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">labels_dir</span><span class="p">):</span>
+        <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Labels directory does not exist: </span><span class="si">{</span><span class="n">labels_dir</span><span class="si">}</span><span class="s2">. Using 3 clusters by default.&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="mi">3</span>
+
+    <span class="n">label_files</span> <span class="o">=</span> <span class="p">[</span><span class="n">f</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">os</span><span class="o">.</span><span class="n">listdir</span><span class="p">(</span><span class="n">labels_dir</span><span class="p">)</span> <span class="k">if</span> <span class="n">f</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;_labels.npy&#39;</span><span class="p">)]</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">label_files</span><span class="p">:</span>
+        <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No label files found in </span><span class="si">{</span><span class="n">labels_dir</span><span class="si">}</span><span class="s2">. Using 3 clusters by default.&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="mi">3</span>
+
+    <span class="c1"># Load the first label file to detect the number of clusters</span>
+    <span class="n">first_file</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">labels_dir</span><span class="p">,</span> <span class="n">label_files</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">labels</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">first_file</span><span class="p">)</span>
+    <span class="n">unique_clusters</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">labels</span><span class="p">)</span>
+
+    <span class="c1"># Exclude cluster 0 if it exists</span>
+    <span class="n">valid_clusters</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">unique_clusters</span> <span class="k">if</span> <span class="n">c</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">]</span>
+
+    <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="n">valid_clusters</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="combine_red_blood_cell_clusters">
+<a class="viewcode-back" href="../index.html#cie_utils.combine_red_blood_cell_clusters">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">combine_red_blood_cell_clusters</span><span class="p">(</span><span class="n">data</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">n_clusters</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">dict</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Combine clusters 3 and 4 into a single cluster for red blood cells.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    data : dict</span>
+<span class="sd">        Dictionary with cluster data.</span>
+<span class="sd">    n_clusters : int</span>
+<span class="sd">        Original number of clusters.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    tuple of (dict, int)</span>
+<span class="sd">        Modified data and new number of clusters.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">n_clusters</span> <span class="o">&gt;=</span> <span class="mi">4</span><span class="p">:</span>
+        <span class="c1"># Combine data from clusters 3 and 4</span>
+        <span class="k">for</span> <span class="n">component</span> <span class="ow">in</span> <span class="p">[</span><span class="s1">&#39;L&#39;</span><span class="p">,</span> <span class="s1">&#39;a&#39;</span><span class="p">,</span> <span class="s1">&#39;b&#39;</span><span class="p">]:</span>
+            <span class="k">if</span> <span class="mi">4</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+                <span class="n">data</span><span class="p">[</span><span class="mi">3</span><span class="p">][</span><span class="n">component</span><span class="p">]</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">data</span><span class="p">[</span><span class="mi">4</span><span class="p">][</span><span class="n">component</span><span class="p">])</span>
+
+        <span class="c1"># Remove cluster 4 if it exists</span>
+        <span class="k">if</span> <span class="mi">4</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+            <span class="k">del</span> <span class="n">data</span><span class="p">[</span><span class="mi">4</span><span class="p">]</span>
+
+        <span class="k">return</span> <span class="n">data</span><span class="p">,</span> <span class="n">n_clusters</span> <span class="o">-</span> <span class="mi">1</span>
+    <span class="k">return</span> <span class="n">data</span><span class="p">,</span> <span class="n">n_clusters</span></div>
+
+
+
+<div class="viewcode-block" id="get_automatic_names_and_colors">
+<a class="viewcode-back" href="../index.html#cie_utils.get_automatic_names_and_colors">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_automatic_names_and_colors</span><span class="p">(</span><span class="n">n_clusters</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">dict</span><span class="p">,</span> <span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Automatically generate names and colors based on the number of clusters.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    n_clusters : int</span>
+<span class="sd">        Number of clusters.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    tuple of (dict, dict)</span>
+<span class="sd">        A tuple containing a names dictionary and a colors dictionary.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Predefined names for common clusters</span>
+    <span class="n">predefined_names</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="mi">1</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;Cluster 1&quot;</span><span class="p">],</span>
+        <span class="mi">2</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;Chromatin&quot;</span><span class="p">,</span> <span class="s2">&quot;Cytoplasm&quot;</span><span class="p">],</span>
+        <span class="mi">3</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;Chromatin&quot;</span><span class="p">,</span> <span class="s2">&quot;Cytoplasm&quot;</span><span class="p">,</span> <span class="s2">&quot;Red blood cell&quot;</span><span class="p">],</span>
+        <span class="mi">4</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;Chromatin&quot;</span><span class="p">,</span> <span class="s2">&quot;Cytoplasm&quot;</span><span class="p">,</span> <span class="s2">&quot;Red blood cell&quot;</span><span class="p">,</span> <span class="s2">&quot;Background&quot;</span><span class="p">],</span>
+        <span class="mi">5</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;Chromatin&quot;</span><span class="p">,</span> <span class="s2">&quot;Cytoplasm&quot;</span><span class="p">,</span> <span class="s2">&quot;Red blood cell&quot;</span><span class="p">,</span> <span class="s2">&quot;Background&quot;</span><span class="p">,</span> <span class="s2">&quot;Other&quot;</span><span class="p">]</span>
+    <span class="p">}</span>
+
+    <span class="c1"># Predefined colors (distinctive color scale)</span>
+    <span class="n">predefined_colors</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;red&#39;</span><span class="p">,</span> <span class="s1">&#39;blue&#39;</span><span class="p">,</span> <span class="s1">&#39;green&#39;</span><span class="p">,</span> <span class="s1">&#39;orange&#39;</span><span class="p">,</span> <span class="s1">&#39;purple&#39;</span><span class="p">,</span>
+                         <span class="s1">&#39;brown&#39;</span><span class="p">,</span> <span class="s1">&#39;pink&#39;</span><span class="p">,</span> <span class="s1">&#39;gray&#39;</span><span class="p">,</span> <span class="s1">&#39;olive&#39;</span><span class="p">,</span> <span class="s1">&#39;cyan&#39;</span><span class="p">]</span>
+
+    <span class="c1"># Get names</span>
+    <span class="k">if</span> <span class="n">n_clusters</span> <span class="ow">in</span> <span class="n">predefined_names</span><span class="p">:</span>
+        <span class="n">names</span> <span class="o">=</span> <span class="p">{</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">:</span> <span class="n">predefined_names</span><span class="p">[</span><span class="n">n_clusters</span><span class="p">][</span><span class="n">i</span><span class="p">]</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_clusters</span><span class="p">)}</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">names</span> <span class="o">=</span> <span class="p">{</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;Cluster </span><span class="si">{</span><span class="n">i</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_clusters</span><span class="p">)}</span>
+
+    <span class="c1"># Get colors</span>
+    <span class="n">colors</span> <span class="o">=</span> <span class="p">{</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">:</span> <span class="n">predefined_colors</span><span class="p">[</span><span class="n">i</span> <span class="o">%</span> <span class="nb">len</span><span class="p">(</span><span class="n">predefined_colors</span><span class="p">)]</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_clusters</span><span class="p">)}</span>
+
+    <span class="k">return</span> <span class="n">names</span><span class="p">,</span> <span class="n">colors</span></div>
+
+
+
+<div class="viewcode-block" id="process_image_with_sampling">
+<a class="viewcode-back" href="../index.html#cie_utils.process_image_with_sampling">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">process_image_with_sampling</span><span class="p">(</span><span class="n">image_path</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">label_path</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">data</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span>
+                                <span class="n">n_clusters</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">use_sampling</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+                                <span class="n">sampling_fraction</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.25</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Process an image with optional random pixel sampling.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    image_path : str</span>
+<span class="sd">        Path to the .npy image file.</span>
+<span class="sd">    label_path : str</span>
+<span class="sd">        Path to the .npy label file.</span>
+<span class="sd">    data : dict</span>
+<span class="sd">        Dictionary for storing data.</span>
+<span class="sd">    n_clusters : int</span>
+<span class="sd">        Number of clusters.</span>
+<span class="sd">    use_sampling : bool, optional</span>
+<span class="sd">        If True, use random sampling (default is False).</span>
+<span class="sd">    sampling_fraction : float, optional</span>
+<span class="sd">        Fraction of pixels to sample (default is 0.25).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Load data</span>
+    <span class="n">labels</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">label_path</span><span class="p">)</span>
+    <span class="n">lab_image</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">image_path</span><span class="p">)</span>
+
+    <span class="n">h</span><span class="p">,</span> <span class="n">w</span> <span class="o">=</span> <span class="n">labels</span><span class="o">.</span><span class="n">shape</span>
+    <span class="n">total_pixels</span> <span class="o">=</span> <span class="n">h</span> <span class="o">*</span> <span class="n">w</span>
+
+    <span class="k">if</span> <span class="n">use_sampling</span><span class="p">:</span>
+        <span class="c1"># Create random sampling mask over ALL pixels</span>
+        <span class="n">final_mask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">choice</span><span class="p">(</span>
+            <span class="p">[</span><span class="kc">True</span><span class="p">,</span> <span class="kc">False</span><span class="p">],</span>
+            <span class="n">size</span><span class="o">=</span><span class="n">total_pixels</span><span class="p">,</span>
+            <span class="n">p</span><span class="o">=</span><span class="p">[</span><span class="n">sampling_fraction</span><span class="p">,</span> <span class="mi">1</span> <span class="o">-</span> <span class="n">sampling_fraction</span><span class="p">]</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Flatten arrays with sampling</span>
+        <span class="n">L_flat</span> <span class="o">=</span> <span class="n">lab_image</span><span class="p">[:,</span> <span class="p">:,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">flatten</span><span class="p">()[</span><span class="n">final_mask</span><span class="p">]</span>
+        <span class="n">a_flat</span> <span class="o">=</span> <span class="n">lab_image</span><span class="p">[:,</span> <span class="p">:,</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">flatten</span><span class="p">()[</span><span class="n">final_mask</span><span class="p">]</span>
+        <span class="n">b_flat</span> <span class="o">=</span> <span class="n">lab_image</span><span class="p">[:,</span> <span class="p">:,</span> <span class="mi">2</span><span class="p">]</span><span class="o">.</span><span class="n">flatten</span><span class="p">()[</span><span class="n">final_mask</span><span class="p">]</span>
+        <span class="n">labels_flat</span> <span class="o">=</span> <span class="n">labels</span><span class="o">.</span><span class="n">flatten</span><span class="p">()[</span><span class="n">final_mask</span><span class="p">]</span>
+
+    <span class="k">else</span><span class="p">:</span>
+        <span class="c1"># Full processing (no sampling)</span>
+        <span class="n">L_flat</span> <span class="o">=</span> <span class="n">lab_image</span><span class="p">[:,</span> <span class="p">:,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">flatten</span><span class="p">()</span>
+        <span class="n">a_flat</span> <span class="o">=</span> <span class="n">lab_image</span><span class="p">[:,</span> <span class="p">:,</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">flatten</span><span class="p">()</span>
+        <span class="n">b_flat</span> <span class="o">=</span> <span class="n">lab_image</span><span class="p">[:,</span> <span class="p">:,</span> <span class="mi">2</span><span class="p">]</span><span class="o">.</span><span class="n">flatten</span><span class="p">()</span>
+        <span class="n">labels_flat</span> <span class="o">=</span> <span class="n">labels</span><span class="o">.</span><span class="n">flatten</span><span class="p">()</span>
+
+    <span class="c1"># Extract data for each cluster</span>
+    <span class="k">for</span> <span class="n">cluster_id</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">n_clusters</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="n">mask</span> <span class="o">=</span> <span class="p">(</span><span class="n">labels_flat</span> <span class="o">==</span> <span class="n">cluster_id</span><span class="p">)</span>
+        <span class="n">data</span><span class="p">[</span><span class="n">cluster_id</span><span class="p">][</span><span class="s2">&quot;L&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">L_flat</span><span class="p">[</span><span class="n">mask</span><span class="p">])</span>
+        <span class="n">data</span><span class="p">[</span><span class="n">cluster_id</span><span class="p">][</span><span class="s2">&quot;a&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">a_flat</span><span class="p">[</span><span class="n">mask</span><span class="p">])</span>
+        <span class="n">data</span><span class="p">[</span><span class="n">cluster_id</span><span class="p">][</span><span class="s2">&quot;b&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">b_flat</span><span class="p">[</span><span class="n">mask</span><span class="p">])</span></div>
+
+
+
+<div class="viewcode-block" id="compute_histograms">
+<a class="viewcode-back" href="../index.html#cie_utils.compute_histograms">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">compute_histograms</span><span class="p">(</span><span class="n">data</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">n_clusters</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">bins</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">40</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Compute smoothed histograms for all clusters and components.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    data : dict</span>
+<span class="sd">        Dictionary with cluster data.</span>
+<span class="sd">    n_clusters : int</span>
+<span class="sd">        Number of clusters.</span>
+<span class="sd">    bins : int, optional</span>
+<span class="sd">        Number of bins for the histogram (default is 40).</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    dict</span>
+<span class="sd">        Dictionary with smoothed curves per component and cluster.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">smoothed_curves</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;L&#39;</span><span class="p">:</span> <span class="p">{},</span> <span class="s1">&#39;a&#39;</span><span class="p">:</span> <span class="p">{},</span> <span class="s1">&#39;b&#39;</span><span class="p">:</span> <span class="p">{}}</span>
+
+    <span class="k">for</span> <span class="n">cluster_id</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">n_clusters</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">comp</span> <span class="ow">in</span> <span class="p">[</span><span class="s1">&#39;L&#39;</span><span class="p">,</span> <span class="s1">&#39;a&#39;</span><span class="p">,</span> <span class="s1">&#39;b&#39;</span><span class="p">]:</span>
+            <span class="n">values</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">data</span><span class="p">[</span><span class="n">cluster_id</span><span class="p">][</span><span class="n">comp</span><span class="p">])</span>
+
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">values</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="c1"># Compute histogram</span>
+                <span class="n">counts</span><span class="p">,</span> <span class="n">bins_edges</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">histogram</span><span class="p">(</span><span class="n">values</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="n">bins</span><span class="p">)</span>
+                <span class="n">centers</span> <span class="o">=</span> <span class="p">(</span><span class="n">bins_edges</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="n">bins_edges</span><span class="p">[</span><span class="mi">1</span><span class="p">:])</span> <span class="o">/</span> <span class="mi">2</span>
+
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="c1"># Smooth with spline</span>
+                    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">centers</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">4</span><span class="p">:</span>  <span class="c1"># Required for cubic spline</span>
+                        <span class="n">spline</span> <span class="o">=</span> <span class="n">make_interp_spline</span><span class="p">(</span><span class="n">centers</span><span class="p">,</span> <span class="n">counts</span><span class="p">,</span> <span class="n">k</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>
+                        <span class="n">x_smooth</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="n">centers</span><span class="o">.</span><span class="n">min</span><span class="p">(),</span> <span class="n">centers</span><span class="o">.</span><span class="n">max</span><span class="p">(),</span> <span class="mi">500</span><span class="p">)</span>
+                        <span class="n">y_smooth</span> <span class="o">=</span> <span class="n">spline</span><span class="p">(</span><span class="n">x_smooth</span><span class="p">)</span>
+                        <span class="n">smoothed_curves</span><span class="p">[</span><span class="n">comp</span><span class="p">][</span><span class="n">cluster_id</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">x_smooth</span><span class="p">,</span> <span class="n">y_smooth</span><span class="p">)</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="c1"># Not enough points, use linear interpolation</span>
+                        <span class="n">smoothed_curves</span><span class="p">[</span><span class="n">comp</span><span class="p">][</span><span class="n">cluster_id</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">centers</span><span class="p">,</span> <span class="n">counts</span><span class="p">)</span>
+                <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                    <span class="c1"># Fallback to original data</span>
+                    <span class="n">smoothed_curves</span><span class="p">[</span><span class="n">comp</span><span class="p">][</span><span class="n">cluster_id</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">centers</span><span class="p">,</span> <span class="n">counts</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">smoothed_curves</span></div>
+
+
+
+<div class="viewcode-block" id="compute_all_intersections">
+<a class="viewcode-back" href="../index.html#cie_utils.compute_all_intersections">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">compute_all_intersections</span><span class="p">(</span><span class="n">smoothed_curves</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">names</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span>
+                              <span class="n">distance_threshold</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">6.0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Compute all intersections between cluster pairs for each component.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    smoothed_curves : dict</span>
+<span class="sd">        Dictionary with curves per component and cluster.</span>
+<span class="sd">    names : dict</span>
+<span class="sd">        Dictionary of cluster names.</span>
+<span class="sd">    distance_threshold : float, optional</span>
+<span class="sd">        Threshold for filtering nearby intersections (default is 6.0).</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    dict</span>
+<span class="sd">        Dictionary with intersections per component and cluster pair.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">intersections_by_component</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;L&#39;</span><span class="p">:</span> <span class="p">{},</span> <span class="s1">&#39;a&#39;</span><span class="p">:</span> <span class="p">{},</span> <span class="s1">&#39;b&#39;</span><span class="p">:</span> <span class="p">{}}</span>
+
+    <span class="k">for</span> <span class="n">comp</span> <span class="ow">in</span> <span class="p">[</span><span class="s1">&#39;L&#39;</span><span class="p">,</span> <span class="s1">&#39;a&#39;</span><span class="p">,</span> <span class="s1">&#39;b&#39;</span><span class="p">]:</span>
+        <span class="n">present_clusters</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">smoothed_curves</span><span class="p">[</span><span class="n">comp</span><span class="p">]</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span>
+
+        <span class="c1"># Generate all unique pairs</span>
+        <span class="n">pairs</span> <span class="o">=</span> <span class="p">[(</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">present_clusters</span> <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="n">present_clusters</span> <span class="k">if</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="n">j</span><span class="p">]</span>
+
+        <span class="k">for</span> <span class="n">id1</span><span class="p">,</span> <span class="n">id2</span> <span class="ow">in</span> <span class="n">pairs</span><span class="p">:</span>
+            <span class="n">x1</span><span class="p">,</span> <span class="n">y1</span> <span class="o">=</span> <span class="n">smoothed_curves</span><span class="p">[</span><span class="n">comp</span><span class="p">][</span><span class="n">id1</span><span class="p">]</span>
+            <span class="n">x2</span><span class="p">,</span> <span class="n">y2</span> <span class="o">=</span> <span class="n">smoothed_curves</span><span class="p">[</span><span class="n">comp</span><span class="p">][</span><span class="n">id2</span><span class="p">]</span>
+
+            <span class="n">intersections</span> <span class="o">=</span> <span class="n">find_intersections</span><span class="p">(</span><span class="n">x1</span><span class="p">,</span> <span class="n">y1</span><span class="p">,</span> <span class="n">x2</span><span class="p">,</span> <span class="n">y2</span><span class="p">,</span> <span class="n">distance_threshold</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">intersections</span><span class="p">:</span>
+                <span class="n">pair_name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">names</span><span class="p">[</span><span class="n">id1</span><span class="p">]</span><span class="si">}</span><span class="s2">-</span><span class="si">{</span><span class="n">names</span><span class="p">[</span><span class="n">id2</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="n">intersections_by_component</span><span class="p">[</span><span class="n">comp</span><span class="p">][</span><span class="n">pair_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">intersections</span>
+
+    <span class="k">return</span> <span class="n">intersections_by_component</span></div>
+
+
+
+<div class="viewcode-block" id="plot_distributions_with_intersections">
+<a class="viewcode-back" href="../index.html#cie_utils.plot_distributions_with_intersections">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">plot_distributions_with_intersections</span><span class="p">(</span><span class="n">smoothed_curves</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span>
+                                          <span class="n">names</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">colors</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span>
+                                          <span class="n">intersections_by_component</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span>
+                                          <span class="n">show_plots</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">plt</span><span class="o">.</span><span class="n">Figure</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Plot distributions with marked intersections.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    smoothed_curves : dict</span>
+<span class="sd">        Dictionary with smoothed curves.</span>
+<span class="sd">    names : dict</span>
+<span class="sd">        Dictionary of cluster names.</span>
+<span class="sd">    colors : dict</span>
+<span class="sd">        Dictionary of colors per cluster.</span>
+<span class="sd">    intersections_by_component : dict</span>
+<span class="sd">        Computed intersections.</span>
+<span class="sd">    show_plots : bool, optional</span>
+<span class="sd">        If True, display the plots (default is True).</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    matplotlib.figure.Figure or None</span>
+<span class="sd">        Matplotlib figure if ``show_plots`` is False, otherwise None.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">show_plots</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+
+    <span class="n">fig</span><span class="p">,</span> <span class="n">axes</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">20</span><span class="p">,</span> <span class="mi">6</span><span class="p">))</span>
+    <span class="n">fig</span><span class="o">.</span><span class="n">suptitle</span><span class="p">(</span><span class="s1">&#39;Frequency Distributions by LAB Component&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">16</span><span class="p">)</span>
+
+    <span class="n">components</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;L&#39;</span><span class="p">,</span> <span class="s1">&#39;a&#39;</span><span class="p">,</span> <span class="s1">&#39;b&#39;</span><span class="p">]</span>
+    <span class="n">titles</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;L Distribution (Luminosity)&#39;</span><span class="p">,</span>
+              <span class="s1">&#39;a Distribution (Green-Red)&#39;</span><span class="p">,</span>
+              <span class="s1">&#39;b Distribution (Blue-Yellow)&#39;</span><span class="p">]</span>
+
+    <span class="k">for</span> <span class="n">idx</span><span class="p">,</span> <span class="n">comp</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">components</span><span class="p">):</span>
+        <span class="n">ax</span> <span class="o">=</span> <span class="n">axes</span><span class="p">[</span><span class="n">idx</span><span class="p">]</span>
+
+        <span class="c1"># Plot all curves</span>
+        <span class="k">for</span> <span class="n">cluster_id</span><span class="p">,</span> <span class="p">(</span><span class="n">x_smooth</span><span class="p">,</span> <span class="n">y_smooth</span><span class="p">)</span> <span class="ow">in</span> <span class="n">smoothed_curves</span><span class="p">[</span><span class="n">comp</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">ax</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">x_smooth</span><span class="p">,</span> <span class="n">y_smooth</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="n">colors</span><span class="p">[</span><span class="n">cluster_id</span><span class="p">],</span>
+                    <span class="n">label</span><span class="o">=</span><span class="n">names</span><span class="p">[</span><span class="n">cluster_id</span><span class="p">],</span> <span class="n">linewidth</span><span class="o">=</span><span class="mf">2.5</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.8</span><span class="p">)</span>
+
+        <span class="c1"># Mark intersections for this component</span>
+        <span class="k">for</span> <span class="n">pair_name</span><span class="p">,</span> <span class="n">intersections</span> <span class="ow">in</span> <span class="n">intersections_by_component</span><span class="p">[</span><span class="n">comp</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">for</span> <span class="n">x_int</span><span class="p">,</span> <span class="n">y_int</span> <span class="ow">in</span> <span class="n">intersections</span><span class="p">:</span>
+                <span class="c1"># Vertical line at the intersection</span>
+                <span class="n">ax</span><span class="o">.</span><span class="n">axvline</span><span class="p">(</span><span class="n">x</span><span class="o">=</span><span class="n">x_int</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;gray&#39;</span><span class="p">,</span> <span class="n">linestyle</span><span class="o">=</span><span class="s1">&#39;--&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.7</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+                <span class="c1"># Point on the X axis</span>
+                <span class="n">ax</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">x_int</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="s1">&#39;o&#39;</span><span class="p">,</span> <span class="n">markersize</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">markeredgewidth</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span>
+                        <span class="n">markerfacecolor</span><span class="o">=</span><span class="s1">&#39;yellow&#39;</span><span class="p">,</span> <span class="n">markeredgecolor</span><span class="o">=</span><span class="s1">&#39;black&#39;</span><span class="p">)</span>
+                <span class="c1"># Label with the value</span>
+                <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="n">x_int</span><span class="p">,</span> <span class="n">ax</span><span class="o">.</span><span class="n">get_ylim</span><span class="p">()[</span><span class="mi">1</span><span class="p">]</span> <span class="o">*</span> <span class="mf">0.05</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">x_int</span><span class="si">:</span><span class="s1">.1f</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span>
+                        <span class="n">fontsize</span><span class="o">=</span><span class="mi">9</span><span class="p">,</span> <span class="n">ha</span><span class="o">=</span><span class="s1">&#39;center&#39;</span><span class="p">,</span> <span class="n">va</span><span class="o">=</span><span class="s1">&#39;bottom&#39;</span><span class="p">,</span> <span class="n">rotation</span><span class="o">=</span><span class="mi">90</span><span class="p">,</span>
+                        <span class="n">bbox</span><span class="o">=</span><span class="nb">dict</span><span class="p">(</span><span class="n">boxstyle</span><span class="o">=</span><span class="s2">&quot;round,pad=0.2&quot;</span><span class="p">,</span> <span class="n">facecolor</span><span class="o">=</span><span class="s2">&quot;white&quot;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.9</span><span class="p">))</span>
+
+        <span class="n">ax</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">comp</span><span class="si">}</span><span class="s1"> Value&#39;</span><span class="p">)</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s1">&#39;Frequency (pixels)&#39;</span><span class="p">)</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="n">titles</span><span class="p">[</span><span class="n">idx</span><span class="p">])</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">legend</span><span class="p">()</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.3</span><span class="p">)</span>
+
+    <span class="n">plt</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
+
+    <span class="k">if</span> <span class="n">show_plots</span><span class="p">:</span>
+        <span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">fig</span></div>
+
+
+
+<div class="viewcode-block" id="print_intersection_summary">
+<a class="viewcode-back" href="../index.html#cie_utils.print_intersection_summary">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">print_intersection_summary</span><span class="p">(</span><span class="n">intersections_by_component</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span>
+                               <span class="n">names</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">n_clusters</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Print a summary of intersections to the console.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    intersections_by_component : dict</span>
+<span class="sd">        Dictionary with intersections.</span>
+<span class="sd">    names : dict</span>
+<span class="sd">        Dictionary of cluster names.</span>
+<span class="sd">    n_clusters : int</span>
+<span class="sd">        Number of clusters.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;INTERSECTION POINTS SUMMARY (</span><span class="si">{</span><span class="n">n_clusters</span><span class="si">}</span><span class="s2"> CLUSTERS)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">comp</span> <span class="ow">in</span> <span class="p">[</span><span class="s1">&#39;L&#39;</span><span class="p">,</span> <span class="s1">&#39;a&#39;</span><span class="p">,</span> <span class="s1">&#39;b&#39;</span><span class="p">]:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">--- Component </span><span class="si">{</span><span class="n">comp</span><span class="si">}</span><span class="s2"> ---&quot;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">comp</span> <span class="ow">in</span> <span class="n">intersections_by_component</span> <span class="ow">and</span> <span class="n">intersections_by_component</span><span class="p">[</span><span class="n">comp</span><span class="p">]:</span>
+            <span class="k">for</span> <span class="n">pair_name</span><span class="p">,</span> <span class="n">intersections</span> <span class="ow">in</span> <span class="n">intersections_by_component</span><span class="p">[</span><span class="n">comp</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Intersections </span><span class="si">{</span><span class="n">pair_name</span><span class="si">}</span><span class="s2">:&quot;</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="n">intersections</span><span class="p">:</span>
+                    <span class="n">filtered_intersections</span> <span class="o">=</span> <span class="n">filter_intersections_for_console</span><span class="p">(</span>
+                        <span class="n">intersections</span><span class="p">,</span> <span class="n">distance_threshold</span><span class="o">=</span><span class="mf">3.0</span>
+                    <span class="p">)</span>
+
+                    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">filtered_intersections</span><span class="p">,</span> <span class="mi">1</span><span class="p">):</span>
+                        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Point </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">: x = </span><span class="si">{</span><span class="n">x</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+                    <span class="c1"># Filtering statistics</span>
+                    <span class="k">if</span> <span class="n">intersections</span> <span class="ow">and</span> <span class="n">filtered_intersections</span><span class="p">:</span>
+                        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  (Filtered: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">intersections</span><span class="p">)</span><span class="si">}</span><span class="s2"> -&gt; </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">filtered_intersections</span><span class="p">)</span><span class="si">}</span><span class="s2"> points)&quot;</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  No significant intersections&quot;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  No intersections for this component&quot;</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="analyze_lab_distributions">
+<a class="viewcode-back" href="../index.html#cie_utils.analyze_lab_distributions">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">analyze_lab_distributions</span><span class="p">(</span><span class="n">input_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">labels_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+                              <span class="n">use_sampling</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+                              <span class="n">sampling_fraction</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.25</span><span class="p">,</span>
+                              <span class="n">show_plots</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+                              <span class="n">bins</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">40</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Main function to analyze LAB distributions and compute intersections.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    input_dir : str</span>
+<span class="sd">        Directory with .npy image files.</span>
+<span class="sd">    labels_dir : str</span>
+<span class="sd">        Directory with .npy label files.</span>
+<span class="sd">    use_sampling : bool, optional</span>
+<span class="sd">        If True, use random sampling (default is False).</span>
+<span class="sd">    sampling_fraction : float, optional</span>
+<span class="sd">        Fraction of pixels to sample (default is 0.25).</span>
+<span class="sd">    show_plots : bool, optional</span>
+<span class="sd">        If True, display plots (default is True).</span>
+<span class="sd">    bins : int, optional</span>
+<span class="sd">        Number of bins for histograms (default is 40).</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    dict</span>
+<span class="sd">        Dictionary with all analysis results including keys: ``&#39;data&#39;``,</span>
+<span class="sd">        ``&#39;n_clusters&#39;``, ``&#39;names&#39;``, ``&#39;colors&#39;``, ``&#39;smoothed_curves&#39;``,</span>
+<span class="sd">        ``&#39;intersections_by_component&#39;``, ``&#39;num_images_processed&#39;``,</span>
+<span class="sd">        ``&#39;use_sampling&#39;``, ``&#39;sampling_fraction&#39;``.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Detect number of clusters</span>
+    <span class="n">n_clusters</span> <span class="o">=</span> <span class="n">detect_number_of_clusters</span><span class="p">(</span><span class="n">labels_dir</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Number of clusters detected: </span><span class="si">{</span><span class="n">n_clusters</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Initialize data</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="p">{</span><span class="n">cluster_id</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;L&quot;</span><span class="p">:</span> <span class="p">[],</span> <span class="s2">&quot;a&quot;</span><span class="p">:</span> <span class="p">[],</span> <span class="s2">&quot;b&quot;</span><span class="p">:</span> <span class="p">[]}</span> <span class="k">for</span> <span class="n">cluster_id</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">n_clusters</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)}</span>
+
+    <span class="c1"># Process images</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">labels_dir</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No label files found in </span><span class="si">{</span><span class="n">labels_dir</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">label_files</span> <span class="o">=</span> <span class="p">[</span><span class="n">f</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">os</span><span class="o">.</span><span class="n">listdir</span><span class="p">(</span><span class="n">labels_dir</span><span class="p">)</span> <span class="k">if</span> <span class="n">f</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;_labels.npy&#39;</span><span class="p">)]</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">label_files</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No label files found in </span><span class="si">{</span><span class="n">labels_dir</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processing </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">label_files</span><span class="p">)</span><span class="si">}</span><span class="s2"> images...&quot;</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">file</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">label_files</span><span class="p">,</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="n">base_name</span> <span class="o">=</span> <span class="n">file</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;_labels.npy&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+        <span class="n">label_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">labels_dir</span><span class="p">,</span> <span class="n">file</span><span class="p">)</span>
+        <span class="n">image_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">input_dir</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">base_name</span><span class="si">}</span><span class="s2">.npy&quot;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">image_path</span><span class="p">):</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Image not found: </span><span class="si">{</span><span class="n">image_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">continue</span>
+
+        <span class="n">process_image_with_sampling</span><span class="p">(</span><span class="n">image_path</span><span class="p">,</span> <span class="n">label_path</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">n_clusters</span><span class="p">,</span>
+                                    <span class="n">use_sampling</span><span class="p">,</span> <span class="n">sampling_fraction</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">i</span> <span class="o">%</span> <span class="mi">10</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Processed </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">label_files</span><span class="p">)</span><span class="si">}</span><span class="s2"> images&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Combine clusters if necessary</span>
+    <span class="n">data</span><span class="p">,</span> <span class="n">n_clusters</span> <span class="o">=</span> <span class="n">combine_red_blood_cell_clusters</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">n_clusters</span><span class="p">)</span>
+
+    <span class="c1"># Get names and colors</span>
+    <span class="n">names</span><span class="p">,</span> <span class="n">colors</span> <span class="o">=</span> <span class="n">get_automatic_names_and_colors</span><span class="p">(</span><span class="n">n_clusters</span><span class="p">)</span>
+
+    <span class="c1"># Compute smoothed histograms</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Computing smoothed histograms...&quot;</span><span class="p">)</span>
+    <span class="n">smoothed_curves</span> <span class="o">=</span> <span class="n">compute_histograms</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">n_clusters</span><span class="p">,</span> <span class="n">bins</span><span class="p">)</span>
+
+    <span class="c1"># Compute intersections</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Computing intersections...&quot;</span><span class="p">)</span>
+    <span class="n">intersections_by_component</span> <span class="o">=</span> <span class="n">compute_all_intersections</span><span class="p">(</span>
+        <span class="n">smoothed_curves</span><span class="p">,</span> <span class="n">names</span>
+    <span class="p">)</span>
+
+    <span class="c1"># Plot (if requested)</span>
+    <span class="k">if</span> <span class="n">show_plots</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Generating plots...&quot;</span><span class="p">)</span>
+        <span class="n">plot_distributions_with_intersections</span><span class="p">(</span>
+            <span class="n">smoothed_curves</span><span class="p">,</span> <span class="n">names</span><span class="p">,</span> <span class="n">colors</span><span class="p">,</span> <span class="n">intersections_by_component</span><span class="p">,</span> <span class="kc">True</span>
+        <span class="p">)</span>
+
+    <span class="c1"># Print summary</span>
+    <span class="n">print_intersection_summary</span><span class="p">(</span><span class="n">intersections_by_component</span><span class="p">,</span> <span class="n">names</span><span class="p">,</span> <span class="n">n_clusters</span><span class="p">)</span>
+
+    <span class="c1"># Return all results</span>
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s1">&#39;data&#39;</span><span class="p">:</span> <span class="n">data</span><span class="p">,</span>
+        <span class="s1">&#39;n_clusters&#39;</span><span class="p">:</span> <span class="n">n_clusters</span><span class="p">,</span>
+        <span class="s1">&#39;names&#39;</span><span class="p">:</span> <span class="n">names</span><span class="p">,</span>
+        <span class="s1">&#39;colors&#39;</span><span class="p">:</span> <span class="n">colors</span><span class="p">,</span>
+        <span class="s1">&#39;smoothed_curves&#39;</span><span class="p">:</span> <span class="n">smoothed_curves</span><span class="p">,</span>
+        <span class="s1">&#39;intersections_by_component&#39;</span><span class="p">:</span> <span class="n">intersections_by_component</span><span class="p">,</span>
+        <span class="s1">&#39;num_images_processed&#39;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">label_files</span><span class="p">),</span>
+        <span class="s1">&#39;use_sampling&#39;</span><span class="p">:</span> <span class="n">use_sampling</span><span class="p">,</span>
+        <span class="s1">&#39;sampling_fraction&#39;</span><span class="p">:</span> <span class="n">sampling_fraction</span> <span class="k">if</span> <span class="n">use_sampling</span> <span class="k">else</span> <span class="mf">1.0</span>
+    <span class="p">}</span></div>
+
+
+<div class="viewcode-block" id="apply_median_filter">
+<a class="viewcode-back" href="../index.html#cie_utils.apply_median_filter">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">apply_median_filter</span><span class="p">(</span><span class="n">image</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">kernel_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">3</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Apply a median filter to an image.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    image : np.ndarray</span>
+<span class="sd">        Numpy array with the image (2D or 3D for RGB).</span>
+<span class="sd">    kernel_size : int, optional</span>
+<span class="sd">        Kernel size (must be odd) (default is 3).</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    np.ndarray</span>
+<span class="sd">        Filtered image.</span>
+
+<span class="sd">    Raises</span>
+<span class="sd">    ------</span>
+<span class="sd">    ValueError</span>
+<span class="sd">        If kernel_size is not odd or is &lt;= 0.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">kernel_size</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;kernel_size must be greater than 0&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">kernel_size</span> <span class="o">%</span> <span class="mi">2</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;kernel_size must be odd&quot;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">median_filter</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">size</span><span class="o">=</span><span class="n">kernel_size</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="apply_median_filter_rgb">
+<a class="viewcode-back" href="../index.html#cie_utils.apply_median_filter_rgb">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">apply_median_filter_rgb</span><span class="p">(</span><span class="n">rgb_image</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">kernel_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">3</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Apply a median filter to an RGB image (3 channels).</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    rgb_image : np.ndarray</span>
+<span class="sd">        Numpy array with the RGB image (H, W, 3).</span>
+<span class="sd">    kernel_size : int, optional</span>
+<span class="sd">        Kernel size (must be odd) (default is 3).</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    np.ndarray</span>
+<span class="sd">        Filtered RGB image.</span>
+
+<span class="sd">    Raises</span>
+<span class="sd">    ------</span>
+<span class="sd">    ValueError</span>
+<span class="sd">        If the image does not have 3 channels.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">rgb_image</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">3</span> <span class="ow">or</span> <span class="n">rgb_image</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">!=</span> <span class="mi">3</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Image must have 3 channels (RGB)&quot;</span><span class="p">)</span>
+
+    <span class="n">filtered_image</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">rgb_image</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">channel</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">3</span><span class="p">):</span>
+        <span class="n">filtered_image</span><span class="p">[:,</span> <span class="p">:,</span> <span class="n">channel</span><span class="p">]</span> <span class="o">=</span> <span class="n">apply_median_filter</span><span class="p">(</span>
+            <span class="n">rgb_image</span><span class="p">[:,</span> <span class="p">:,</span> <span class="n">channel</span><span class="p">],</span> <span class="n">kernel_size</span>
+        <span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">filtered_image</span></div>
+
+
+
+<div class="viewcode-block" id="process_npy_images">
+<a class="viewcode-back" href="../index.html#cie_utils.process_npy_images">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">process_npy_images</span><span class="p">(</span><span class="n">input_folder</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">output_folder</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+                       <span class="n">kernel_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">3</span><span class="p">,</span> <span class="n">process_rgb</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Process all .npy images in a folder by applying a median filter.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    input_folder : str</span>
+<span class="sd">        Path to the folder with .npy files.</span>
+<span class="sd">    output_folder : str</span>
+<span class="sd">        Path where processed images will be saved.</span>
+<span class="sd">    kernel_size : int, optional</span>
+<span class="sd">        Kernel size (must be odd) (default is 3).</span>
+<span class="sd">    process_rgb : bool, optional</span>
+<span class="sd">        If True, process as RGB (3 channels); if False, as grayscale</span>
+<span class="sd">        (default is True).</span>
+
+<span class="sd">    Raises</span>
+<span class="sd">    ------</span>
+<span class="sd">    ValueError</span>
+<span class="sd">        If folders do not exist or kernel_size is invalid.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">input_folder</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Input folder does not exist: </span><span class="si">{</span><span class="n">input_folder</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">kernel_size</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="ow">or</span> <span class="n">kernel_size</span> <span class="o">%</span> <span class="mi">2</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;kernel_size must be a positive odd number&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Create output folder if it does not exist</span>
+    <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">output_folder</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="c1"># Get .npy files</span>
+    <span class="n">files</span> <span class="o">=</span> <span class="p">[</span><span class="n">f</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">os</span><span class="o">.</span><span class="n">listdir</span><span class="p">(</span><span class="n">input_folder</span><span class="p">)</span> <span class="k">if</span> <span class="n">f</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;.npy&#39;</span><span class="p">)]</span>
+
+    <span class="k">for</span> <span class="n">filename</span> <span class="ow">in</span> <span class="n">files</span><span class="p">:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">input_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">input_folder</span><span class="p">,</span> <span class="n">filename</span><span class="p">)</span>
+            <span class="n">image</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">input_path</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">process_rgb</span><span class="p">:</span>
+                <span class="c1"># Verify it is RGB</span>
+                <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">image</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">3</span> <span class="ow">or</span> <span class="n">image</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">!=</span> <span class="mi">3</span><span class="p">:</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Warning: </span><span class="si">{</span><span class="n">filename</span><span class="si">}</span><span class="s2"> is not RGB. Skipping...&quot;</span><span class="p">)</span>
+                    <span class="k">continue</span>
+                <span class="n">filtered_image</span> <span class="o">=</span> <span class="n">apply_median_filter_rgb</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">kernel_size</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># Process as grayscale</span>
+                <span class="n">filtered_image</span> <span class="o">=</span> <span class="n">apply_median_filter</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">kernel_size</span><span class="p">)</span>
+
+            <span class="c1"># Save result</span>
+            <span class="n">base_name</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">splitext</span><span class="p">(</span><span class="n">filename</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">output_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">output_folder</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">base_name</span><span class="si">}</span><span class="s2">_filtered.npy&quot;</span><span class="p">)</span>
+            <span class="n">np</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">output_path</span><span class="p">,</span> <span class="n">filtered_image</span><span class="p">)</span>
+
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error processing </span><span class="si">{</span><span class="n">filename</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="create_test_matrix">
+<a class="viewcode-back" href="../index.html#cie_utils.create_test_matrix">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">create_test_matrix</span><span class="p">(</span><span class="n">size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">5</span><span class="p">,</span> <span class="n">kind</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;ordered&#39;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Create test matrices to verify the median filter.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    size : int, optional</span>
+<span class="sd">        Size of the square matrix (default is 5).</span>
+<span class="sd">    kind : str, optional</span>
+<span class="sd">        Type of matrix: ``&#39;ordered&#39;``, ``&#39;random&#39;``, ``&#39;stepped&#39;``, or</span>
+<span class="sd">        ``&#39;edges&#39;`` (default is ``&#39;ordered&#39;``).</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    np.ndarray</span>
+<span class="sd">        Test matrix.</span>
+
+<span class="sd">    Raises</span>
+<span class="sd">    ------</span>
+<span class="sd">    ValueError</span>
+<span class="sd">        If the matrix type is not valid.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">kind</span> <span class="o">==</span> <span class="s1">&#39;ordered&#39;</span><span class="p">:</span>
+        <span class="c1"># Matrix with sequentially ordered values</span>
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([[</span><span class="n">i</span> <span class="o">+</span> <span class="n">j</span> <span class="o">*</span> <span class="n">size</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">size</span><span class="p">)]</span>
+                         <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">size</span><span class="p">)],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+
+    <span class="k">elif</span> <span class="n">kind</span> <span class="o">==</span> <span class="s1">&#39;random&#39;</span><span class="p">:</span>
+        <span class="c1"># Matrix with random values</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">seed</span><span class="p">(</span><span class="mi">42</span><span class="p">)</span>  <span class="c1"># For reproducibility</span>
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">100</span><span class="p">,</span> <span class="p">(</span><span class="n">size</span><span class="p">,</span> <span class="n">size</span><span class="p">))</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+
+    <span class="k">elif</span> <span class="n">kind</span> <span class="o">==</span> <span class="s1">&#39;stepped&#39;</span><span class="p">:</span>
+        <span class="c1"># Matrix with stepped values (good for verifying filters)</span>
+        <span class="n">matrix</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">size</span><span class="p">,</span> <span class="n">size</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">size</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">size</span><span class="p">):</span>
+                <span class="n">matrix</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">]</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">matrix</span>
+
+    <span class="k">elif</span> <span class="n">kind</span> <span class="o">==</span> <span class="s1">&#39;edges&#39;</span><span class="p">:</span>
+        <span class="c1"># Matrix with high edges and low center (for testing edge preservation)</span>
+        <span class="n">matrix</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">((</span><span class="n">size</span><span class="p">,</span> <span class="n">size</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span> <span class="o">*</span> <span class="mi">10</span>
+        <span class="n">border</span> <span class="o">=</span> <span class="n">size</span> <span class="o">//</span> <span class="mi">4</span>
+        <span class="n">matrix</span><span class="p">[:</span><span class="n">border</span><span class="p">,</span> <span class="p">:]</span> <span class="o">=</span> <span class="mi">100</span>   <span class="c1"># Top edge</span>
+        <span class="n">matrix</span><span class="p">[</span><span class="o">-</span><span class="n">border</span><span class="p">:,</span> <span class="p">:]</span> <span class="o">=</span> <span class="mi">100</span>  <span class="c1"># Bottom edge</span>
+        <span class="n">matrix</span><span class="p">[:,</span> <span class="p">:</span><span class="n">border</span><span class="p">]</span> <span class="o">=</span> <span class="mi">100</span>   <span class="c1"># Left edge</span>
+        <span class="n">matrix</span><span class="p">[:,</span> <span class="o">-</span><span class="n">border</span><span class="p">:]</span> <span class="o">=</span> <span class="mi">100</span>  <span class="c1"># Right edge</span>
+        <span class="k">return</span> <span class="n">matrix</span>
+
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Invalid matrix type: </span><span class="si">{</span><span class="n">kind</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="compute_manual_median">
+<a class="viewcode-back" href="../index.html#cie_utils.compute_manual_median">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">compute_manual_median</span><span class="p">(</span><span class="n">matrix</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">i</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">j</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+                          <span class="n">kernel_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">3</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Manually compute the median for a specific position.</span>
+<span class="sd">    Useful for verifying filter results.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    matrix : np.ndarray</span>
+<span class="sd">        Input matrix.</span>
+<span class="sd">    i : int</span>
+<span class="sd">        Row coordinate of the center point.</span>
+<span class="sd">    j : int</span>
+<span class="sd">        Column coordinate of the center point.</span>
+<span class="sd">    kernel_size : int, optional</span>
+<span class="sd">        Kernel size (default is 3).</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    float</span>
+<span class="sd">        Manually computed median value.</span>
+
+<span class="sd">    Raises</span>
+<span class="sd">    ------</span>
+<span class="sd">    ValueError</span>
+<span class="sd">        If kernel_size is not odd.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">kernel_size</span> <span class="o">%</span> <span class="mi">2</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;kernel_size must be odd&quot;</span><span class="p">)</span>
+
+    <span class="n">half</span> <span class="o">=</span> <span class="n">kernel_size</span> <span class="o">//</span> <span class="mi">2</span>
+    <span class="n">h</span><span class="p">,</span> <span class="n">w</span> <span class="o">=</span> <span class="n">matrix</span><span class="o">.</span><span class="n">shape</span>
+
+    <span class="c1"># Extract neighborhood (with reflect padding for border handling)</span>
+    <span class="n">neighborhood</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">di</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="o">-</span><span class="n">half</span><span class="p">,</span> <span class="n">half</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">dj</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="o">-</span><span class="n">half</span><span class="p">,</span> <span class="n">half</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+            <span class="c1"># Compute coordinates with reflect padding</span>
+            <span class="n">ni</span> <span class="o">=</span> <span class="n">i</span> <span class="o">+</span> <span class="n">di</span>
+            <span class="n">nj</span> <span class="o">=</span> <span class="n">j</span> <span class="o">+</span> <span class="n">dj</span>
+
+            <span class="c1"># Apply reflect padding if outside borders</span>
+            <span class="k">if</span> <span class="n">ni</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">ni</span> <span class="o">=</span> <span class="o">-</span><span class="n">ni</span> <span class="o">-</span> <span class="mi">1</span>
+            <span class="k">elif</span> <span class="n">ni</span> <span class="o">&gt;=</span> <span class="n">h</span><span class="p">:</span>
+                <span class="n">ni</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">h</span> <span class="o">-</span> <span class="n">ni</span> <span class="o">-</span> <span class="mi">1</span>
+
+            <span class="k">if</span> <span class="n">nj</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">nj</span> <span class="o">=</span> <span class="o">-</span><span class="n">nj</span> <span class="o">-</span> <span class="mi">1</span>
+            <span class="k">elif</span> <span class="n">nj</span> <span class="o">&gt;=</span> <span class="n">w</span><span class="p">:</span>
+                <span class="n">nj</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">w</span> <span class="o">-</span> <span class="n">nj</span> <span class="o">-</span> <span class="mi">1</span>
+
+            <span class="n">neighborhood</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">matrix</span><span class="p">[</span><span class="n">ni</span><span class="p">,</span> <span class="n">nj</span><span class="p">])</span>
+
+    <span class="c1"># Compute median</span>
+    <span class="k">return</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">median</span><span class="p">(</span><span class="n">neighborhood</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="verify_median_filter">
+<a class="viewcode-back" href="../index.html#cie_utils.verify_median_filter">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">verify_median_filter</span><span class="p">(</span><span class="n">matrix</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">kernel_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">3</span><span class="p">,</span>
+                         <span class="n">positions</span><span class="p">:</span> <span class="nb">list</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">bool</span><span class="p">,</span> <span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Verify that the median filter works correctly by comparing with manual</span>
+<span class="sd">    computation.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    matrix : np.ndarray</span>
+<span class="sd">        Input matrix.</span>
+<span class="sd">    kernel_size : int, optional</span>
+<span class="sd">        Kernel size (default is 3).</span>
+<span class="sd">    positions : list of tuple of (int, int) or None, optional</span>
+<span class="sd">        List of positions [(i1, j1), ...] to verify. If None, verifies all</span>
+<span class="sd">        positions (default is None).</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    tuple of (bool, dict)</span>
+<span class="sd">        A tuple ``(all_correct, detailed_results)`` where ``all_correct`` is</span>
+<span class="sd">        True if all positions match, and ``detailed_results`` is a dictionary</span>
+<span class="sd">        with per-position comparison data.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">positions</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="c1"># Verify all positions</span>
+        <span class="n">h</span><span class="p">,</span> <span class="n">w</span> <span class="o">=</span> <span class="n">matrix</span><span class="o">.</span><span class="n">shape</span>
+        <span class="n">positions</span> <span class="o">=</span> <span class="p">[(</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">h</span><span class="p">)</span> <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">w</span><span class="p">)]</span>
+
+    <span class="c1"># Apply filter</span>
+    <span class="n">filter_result</span> <span class="o">=</span> <span class="n">apply_median_filter</span><span class="p">(</span><span class="n">matrix</span><span class="p">,</span> <span class="n">kernel_size</span><span class="p">)</span>
+
+    <span class="n">results</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">all_correct</span> <span class="o">=</span> <span class="kc">True</span>
+
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span> <span class="ow">in</span> <span class="n">positions</span><span class="p">:</span>
+        <span class="c1"># Compute median manually</span>
+        <span class="n">manual</span> <span class="o">=</span> <span class="n">compute_manual_median</span><span class="p">(</span><span class="n">matrix</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">,</span> <span class="n">kernel_size</span><span class="p">)</span>
+        <span class="n">filtered</span> <span class="o">=</span> <span class="n">filter_result</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">]</span>
+
+        <span class="n">correct</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">isclose</span><span class="p">(</span><span class="n">manual</span><span class="p">,</span> <span class="n">filtered</span><span class="p">,</span> <span class="n">rtol</span><span class="o">=</span><span class="mf">1e-7</span><span class="p">)</span>
+
+        <span class="n">results</span><span class="p">[(</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">)]</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;manual&#39;</span><span class="p">:</span> <span class="n">manual</span><span class="p">,</span>
+            <span class="s1">&#39;filtered&#39;</span><span class="p">:</span> <span class="n">filtered</span><span class="p">,</span>
+            <span class="s1">&#39;correct&#39;</span><span class="p">:</span> <span class="n">correct</span><span class="p">,</span>
+            <span class="s1">&#39;difference&#39;</span><span class="p">:</span> <span class="nb">abs</span><span class="p">(</span><span class="n">manual</span> <span class="o">-</span> <span class="n">filtered</span><span class="p">)</span>
+        <span class="p">}</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">correct</span><span class="p">:</span>
+            <span class="n">all_correct</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="k">return</span> <span class="n">all_correct</span><span class="p">,</span> <span class="n">results</span></div>
+
+
+<div class="viewcode-block" id="accumulate_histograms">
+<a class="viewcode-back" href="../index.html#cie_utils.accumulate_histograms">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">accumulate_histograms</span><span class="p">(</span><span class="n">input_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">labels_dir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">n_clusters</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+                          <span class="n">component</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;L&#39;</span><span class="p">,</span> <span class="n">bins</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">40</span><span class="p">,</span>
+                          <span class="n">use_sampling</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+                          <span class="n">sampling_fraction</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.25</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">dict</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Accumulate histograms per cluster for the chosen component (&#39;L&#39;, &#39;a&#39;, &#39;b&#39;).</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    input_dir : str</span>
+<span class="sd">        Folder with .npy images in LAB format.</span>
+<span class="sd">    labels_dir : str</span>
+<span class="sd">        Folder with K-means label files.</span>
+<span class="sd">    n_clusters : int</span>
+<span class="sd">        Number of detected clusters.</span>
+<span class="sd">    component : str, optional</span>
+<span class="sd">        Component to use: ``&#39;L&#39;``, ``&#39;a&#39;``, or ``&#39;b&#39;`` (default is ``&#39;L&#39;``).</span>
+<span class="sd">    bins : int, optional</span>
+<span class="sd">        Number of bins for the histogram (default is 40).</span>
+<span class="sd">    use_sampling : bool, optional</span>
+<span class="sd">        If True, use random sampling to speed up processing (default is False).</span>
+<span class="sd">    sampling_fraction : float, optional</span>
+<span class="sd">        Fraction of pixels to sample if ``use_sampling`` is True</span>
+<span class="sd">        (default is 0.25).</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    tuple of (dict, tuple)</span>
+<span class="sd">        A tuple ``(accumulators, range)`` where ``accumulators`` is a dict</span>
+<span class="sd">        with histograms per cluster and ``range`` is a tuple</span>
+<span class="sd">        ``(range_min, range_max)`` of the range used.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Prepare accumulators</span>
+    <span class="n">accumulators</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="c1"># Fixed range for Lab</span>
+    <span class="k">if</span> <span class="n">component</span> <span class="o">==</span> <span class="s1">&#39;L&#39;</span><span class="p">:</span>
+        <span class="n">range_min</span><span class="p">,</span> <span class="n">range_max</span> <span class="o">=</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">100.0</span>
+    <span class="k">else</span><span class="p">:</span>  <span class="c1"># &#39;a&#39; or &#39;b&#39;</span>
+        <span class="n">range_min</span><span class="p">,</span> <span class="n">range_max</span> <span class="o">=</span> <span class="o">-</span><span class="mf">128.0</span><span class="p">,</span> <span class="mf">127.0</span>
+
+    <span class="n">comp_idx</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;L&#39;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s1">&#39;a&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span> <span class="s1">&#39;b&#39;</span><span class="p">:</span> <span class="mi">2</span><span class="p">}[</span><span class="n">component</span><span class="p">]</span>
+
+    <span class="c1"># Get label files</span>
+    <span class="n">label_files</span> <span class="o">=</span> <span class="p">[</span><span class="n">f</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">os</span><span class="o">.</span><span class="n">listdir</span><span class="p">(</span><span class="n">labels_dir</span><span class="p">)</span>
+                   <span class="k">if</span> <span class="n">f</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;_labels.npy&#39;</span><span class="p">)]</span>
+
+    <span class="k">for</span> <span class="n">file</span> <span class="ow">in</span> <span class="n">label_files</span><span class="p">:</span>
+        <span class="n">base</span> <span class="o">=</span> <span class="n">file</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;_labels.npy&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+        <span class="n">label_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">labels_dir</span><span class="p">,</span> <span class="n">file</span><span class="p">)</span>
+        <span class="n">image_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">input_dir</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">base</span><span class="si">}</span><span class="s2">.npy&quot;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">image_path</span><span class="p">):</span>
+            <span class="k">continue</span>
+
+        <span class="n">labels</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">label_path</span><span class="p">)</span>
+        <span class="n">lab</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">image_path</span><span class="p">)</span>
+
+        <span class="c1"># Extract values from the selected component</span>
+        <span class="n">vals</span> <span class="o">=</span> <span class="n">lab</span><span class="p">[:,</span> <span class="p">:,</span> <span class="n">comp_idx</span><span class="p">]</span><span class="o">.</span><span class="n">flatten</span><span class="p">()</span>
+        <span class="n">labs_flat</span> <span class="o">=</span> <span class="n">labels</span><span class="o">.</span><span class="n">flatten</span><span class="p">()</span>
+
+        <span class="c1"># Apply sampling if enabled</span>
+        <span class="k">if</span> <span class="n">use_sampling</span><span class="p">:</span>
+            <span class="n">total</span> <span class="o">=</span> <span class="n">vals</span><span class="o">.</span><span class="n">size</span>
+            <span class="n">mask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">choice</span><span class="p">([</span><span class="kc">True</span><span class="p">,</span> <span class="kc">False</span><span class="p">],</span> <span class="n">size</span><span class="o">=</span><span class="n">total</span><span class="p">,</span>
+                                    <span class="n">p</span><span class="o">=</span><span class="p">[</span><span class="n">sampling_fraction</span><span class="p">,</span> <span class="mi">1</span> <span class="o">-</span> <span class="n">sampling_fraction</span><span class="p">])</span>
+            <span class="n">vals</span> <span class="o">=</span> <span class="n">vals</span><span class="p">[</span><span class="n">mask</span><span class="p">]</span>
+            <span class="n">labs_flat</span> <span class="o">=</span> <span class="n">labs_flat</span><span class="p">[</span><span class="n">mask</span><span class="p">]</span>
+
+        <span class="c1"># Accumulate histograms per cluster</span>
+        <span class="k">for</span> <span class="n">cid</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_clusters</span><span class="p">):</span>
+            <span class="n">maskc</span> <span class="o">=</span> <span class="p">(</span><span class="n">labs_flat</span> <span class="o">==</span> <span class="n">cid</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">maskc</span><span class="p">):</span>
+                <span class="n">counts</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">histogram</span><span class="p">(</span><span class="n">vals</span><span class="p">[</span><span class="n">maskc</span><span class="p">],</span> <span class="n">bins</span><span class="o">=</span><span class="n">bins</span><span class="p">,</span>
+                                         <span class="nb">range</span><span class="o">=</span><span class="p">(</span><span class="n">range_min</span><span class="p">,</span> <span class="n">range_max</span><span class="p">))</span>
+                <span class="k">if</span> <span class="n">cid</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">accumulators</span><span class="p">:</span>
+                    <span class="n">accumulators</span><span class="p">[</span><span class="n">cid</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">bins</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
+                <span class="n">accumulators</span><span class="p">[</span><span class="n">cid</span><span class="p">]</span> <span class="o">+=</span> <span class="n">counts</span>
+
+    <span class="c1"># Combine clusters 3 and 4 if they exist (for the specific malaria case)</span>
+    <span class="k">if</span> <span class="n">n_clusters</span> <span class="o">&gt;=</span> <span class="mi">5</span> <span class="ow">and</span> <span class="mi">3</span> <span class="ow">in</span> <span class="n">accumulators</span> <span class="ow">and</span> <span class="mi">4</span> <span class="ow">in</span> <span class="n">accumulators</span><span class="p">:</span>
+        <span class="n">accumulators</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="n">accumulators</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span> <span class="o">+</span> <span class="n">accumulators</span><span class="p">[</span><span class="mi">4</span><span class="p">]</span>
+        <span class="k">del</span> <span class="n">accumulators</span><span class="p">[</span><span class="mi">4</span><span class="p">]</span>
+
+    <span class="k">return</span> <span class="n">accumulators</span><span class="p">,</span> <span class="p">(</span><span class="n">range_min</span><span class="p">,</span> <span class="n">range_max</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="compute_noi">
+<a class="viewcode-back" href="../index.html#cie_utils.compute_noi">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">compute_noi</span><span class="p">(</span><span class="n">hist1</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">hist2</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+                <span class="n">range_values</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">,</span> <span class="n">bins</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">40</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Compute the NOI (overlap area) between two accumulated histograms.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    hist1 : np.ndarray</span>
+<span class="sd">        Histogram of the first cluster.</span>
+<span class="sd">    hist2 : np.ndarray</span>
+<span class="sd">        Histogram of the second cluster.</span>
+<span class="sd">    range_values : tuple of (float, float)</span>
+<span class="sd">        Tuple ``(range_min, range_max)`` of the histogram range.</span>
+<span class="sd">    bins : int, optional</span>
+<span class="sd">        Number of histogram bins (default is 40).</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    float</span>
+<span class="sd">        NOI value between 0 and 1.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">range_min</span><span class="p">,</span> <span class="n">range_max</span> <span class="o">=</span> <span class="n">range_values</span>
+    <span class="n">bin_width</span> <span class="o">=</span> <span class="p">(</span><span class="n">range_max</span> <span class="o">-</span> <span class="n">range_min</span><span class="p">)</span> <span class="o">/</span> <span class="n">bins</span>
+
+    <span class="c1"># Normalize to probability densities</span>
+    <span class="n">area1</span> <span class="o">=</span> <span class="n">hist1</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+    <span class="n">area2</span> <span class="o">=</span> <span class="n">hist2</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+
+    <span class="k">if</span> <span class="n">area1</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">or</span> <span class="n">area2</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">return</span> <span class="mf">0.0</span>
+
+    <span class="n">p1</span> <span class="o">=</span> <span class="n">hist1</span> <span class="o">/</span> <span class="p">(</span><span class="n">area1</span> <span class="o">*</span> <span class="n">bin_width</span><span class="p">)</span>
+    <span class="n">p2</span> <span class="o">=</span> <span class="n">hist2</span> <span class="o">/</span> <span class="p">(</span><span class="n">area2</span> <span class="o">*</span> <span class="n">bin_width</span><span class="p">)</span>
+
+    <span class="c1"># Compute overlap area</span>
+    <span class="n">overlap</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">minimum</span><span class="p">(</span><span class="n">p1</span><span class="p">,</span> <span class="n">p2</span><span class="p">))</span> <span class="o">*</span> <span class="n">bin_width</span>
+    <span class="k">return</span> <span class="nb">float</span><span class="p">(</span><span class="n">overlap</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="simulate_distributions">
+<a class="viewcode-back" href="../index.html#cie_utils.simulate_distributions">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">simulate_distributions</span><span class="p">(</span><span class="n">mu1</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">sigma1</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">mu2</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">sigma2</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+                           <span class="n">bins</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">40</span><span class="p">,</span> <span class="n">n_samples</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">10000</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Simulate two normal distributions and compute the NOI.</span>
+<span class="sd">    Useful for unit tests.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    mu1 : float</span>
+<span class="sd">        Mean of the first distribution.</span>
+<span class="sd">    sigma1 : float</span>
+<span class="sd">        Standard deviation of the first distribution.</span>
+<span class="sd">    mu2 : float</span>
+<span class="sd">        Mean of the second distribution.</span>
+<span class="sd">    sigma2 : float</span>
+<span class="sd">        Standard deviation of the second distribution.</span>
+<span class="sd">    bins : int, optional</span>
+<span class="sd">        Number of bins (default is 40).</span>
+<span class="sd">    n_samples : int, optional</span>
+<span class="sd">        Number of samples to generate (default is 10000).</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    tuple of (np.ndarray, np.ndarray, tuple, float)</span>
+<span class="sd">        A tuple ``(hist1, hist2, range, computed_noi)``.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">range_min</span><span class="p">,</span> <span class="n">range_max</span> <span class="o">=</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">100.0</span>  <span class="c1"># For L component</span>
+
+    <span class="c1"># Generate samples</span>
+    <span class="n">samples1</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">normal</span><span class="p">(</span><span class="n">mu1</span><span class="p">,</span> <span class="n">sigma1</span><span class="p">,</span> <span class="n">n_samples</span><span class="p">),</span>
+                       <span class="n">range_min</span><span class="p">,</span> <span class="n">range_max</span><span class="p">)</span>
+    <span class="n">samples2</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">normal</span><span class="p">(</span><span class="n">mu2</span><span class="p">,</span> <span class="n">sigma2</span><span class="p">,</span> <span class="n">n_samples</span><span class="p">),</span>
+                       <span class="n">range_min</span><span class="p">,</span> <span class="n">range_max</span><span class="p">)</span>
+
+    <span class="c1"># Create histograms</span>
+    <span class="n">hist1</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">histogram</span><span class="p">(</span><span class="n">samples1</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="n">bins</span><span class="p">,</span> <span class="nb">range</span><span class="o">=</span><span class="p">(</span><span class="n">range_min</span><span class="p">,</span> <span class="n">range_max</span><span class="p">))</span>
+    <span class="n">hist2</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">histogram</span><span class="p">(</span><span class="n">samples2</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="n">bins</span><span class="p">,</span> <span class="nb">range</span><span class="o">=</span><span class="p">(</span><span class="n">range_min</span><span class="p">,</span> <span class="n">range_max</span><span class="p">))</span>
+
+    <span class="c1"># Compute NOI</span>
+    <span class="n">noi</span> <span class="o">=</span> <span class="n">compute_noi</span><span class="p">(</span><span class="n">hist1</span><span class="p">,</span> <span class="n">hist2</span><span class="p">,</span> <span class="p">(</span><span class="n">range_min</span><span class="p">,</span> <span class="n">range_max</span><span class="p">),</span> <span class="n">bins</span><span class="o">=</span><span class="n">bins</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">hist1</span><span class="p">,</span> <span class="n">hist2</span><span class="p">,</span> <span class="p">(</span><span class="n">range_min</span><span class="p">,</span> <span class="n">range_max</span><span class="p">),</span> <span class="n">noi</span></div>
+
+
+
+<div class="viewcode-block" id="analytical_noi_gaussians">
+<a class="viewcode-back" href="../index.html#cie_utils.analytical_noi_gaussians">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">analytical_noi_gaussians</span><span class="p">(</span><span class="n">mu1</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">sigma1</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">mu2</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">sigma2</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+                             <span class="n">range_min</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.0</span><span class="p">,</span> <span class="n">range_max</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">100.0</span><span class="p">,</span>
+                             <span class="n">n_points</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">10000</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Analytically compute the NOI for two normal distributions.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    mu1 : float</span>
+<span class="sd">        Mean of the first distribution.</span>
+<span class="sd">    sigma1 : float</span>
+<span class="sd">        Standard deviation of the first distribution.</span>
+<span class="sd">    mu2 : float</span>
+<span class="sd">        Mean of the second distribution.</span>
+<span class="sd">    sigma2 : float</span>
+<span class="sd">        Standard deviation of the second distribution.</span>
+<span class="sd">    range_min : float, optional</span>
+<span class="sd">        Minimum value of the range (default is 0.0).</span>
+<span class="sd">    range_max : float, optional</span>
+<span class="sd">        Maximum value of the range (default is 100.0).</span>
+<span class="sd">    n_points : int, optional</span>
+<span class="sd">        Number of points for numerical integration (default is 10000).</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    float</span>
+<span class="sd">        Analytically computed NOI.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Create grid for integration</span>
+    <span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="nb">max</span><span class="p">(</span><span class="n">mu1</span> <span class="o">-</span> <span class="mi">4</span> <span class="o">*</span> <span class="n">sigma1</span><span class="p">,</span> <span class="n">mu2</span> <span class="o">-</span> <span class="mi">4</span> <span class="o">*</span> <span class="n">sigma2</span><span class="p">,</span> <span class="n">range_min</span><span class="p">),</span>
+                    <span class="nb">min</span><span class="p">(</span><span class="n">mu1</span> <span class="o">+</span> <span class="mi">4</span> <span class="o">*</span> <span class="n">sigma1</span><span class="p">,</span> <span class="n">mu2</span> <span class="o">+</span> <span class="mi">4</span> <span class="o">*</span> <span class="n">sigma2</span><span class="p">,</span> <span class="n">range_max</span><span class="p">),</span> <span class="n">n_points</span><span class="p">)</span>
+
+    <span class="c1"># Check that there are points in the range</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">return</span> <span class="mf">0.0</span>
+
+    <span class="c1"># Normal PDFs</span>
+    <span class="n">pdf1</span> <span class="o">=</span> <span class="p">(</span><span class="mi">1</span> <span class="o">/</span> <span class="p">(</span><span class="n">sigma1</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">)))</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="mf">0.5</span> <span class="o">*</span> <span class="p">((</span><span class="n">x</span> <span class="o">-</span> <span class="n">mu1</span><span class="p">)</span> <span class="o">/</span> <span class="n">sigma1</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span><span class="p">)</span>
+    <span class="n">pdf2</span> <span class="o">=</span> <span class="p">(</span><span class="mi">1</span> <span class="o">/</span> <span class="p">(</span><span class="n">sigma2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">)))</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="mf">0.5</span> <span class="o">*</span> <span class="p">((</span><span class="n">x</span> <span class="o">-</span> <span class="n">mu2</span><span class="p">)</span> <span class="o">/</span> <span class="n">sigma2</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span><span class="p">)</span>
+
+    <span class="c1"># Normalize within the range</span>
+    <span class="n">mask</span> <span class="o">=</span> <span class="p">(</span><span class="n">x</span> <span class="o">&gt;=</span> <span class="n">range_min</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">x</span> <span class="o">&lt;=</span> <span class="n">range_max</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">np</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">mask</span><span class="p">):</span>
+        <span class="k">return</span> <span class="mf">0.0</span>
+
+    <span class="n">pdf1</span> <span class="o">=</span> <span class="n">pdf1</span><span class="p">[</span><span class="n">mask</span><span class="p">]</span>
+    <span class="n">pdf2</span> <span class="o">=</span> <span class="n">pdf2</span><span class="p">[</span><span class="n">mask</span><span class="p">]</span>
+    <span class="n">x</span> <span class="o">=</span> <span class="n">x</span><span class="p">[</span><span class="n">mask</span><span class="p">]</span>
+
+    <span class="c1"># Normalize to area = 1 within the range</span>
+    <span class="n">pdf1</span> <span class="o">=</span> <span class="n">pdf1</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">trapz</span><span class="p">(</span><span class="n">pdf1</span><span class="p">,</span> <span class="n">x</span><span class="p">)</span>
+    <span class="n">pdf2</span> <span class="o">=</span> <span class="n">pdf2</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">trapz</span><span class="p">(</span><span class="n">pdf2</span><span class="p">,</span> <span class="n">x</span><span class="p">)</span>
+
+    <span class="c1"># Compute NOI</span>
+    <span class="n">analytical_noi</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">trapz</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">minimum</span><span class="p">(</span><span class="n">pdf1</span><span class="p">,</span> <span class="n">pdf2</span><span class="p">),</span> <span class="n">x</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">float</span><span class="p">(</span><span class="n">analytical_noi</span><span class="p">)</span></div>
 
 </pre></div>
         </article>
