@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "cie-utils"
-version = "0.2.0"
+version = "0.2.1"
 description = "Image processing based on CIELAB color space."
 authors = ["Jesus Alberto Rodriguez Henao <jarh1992@gmail.com>"]
 readme = "README.md"
