@@ -13,7 +13,7 @@ import numpy.typing as npt
 import pandas as pd
 import yaml
 from pytz import timezone
-from scipy.interpolate import interp1d, make_interp_spline
+from scipy.interpolate import make_interp_spline
 from scipy.ndimage import median_filter
 from scipy.stats import gaussian_kde, iqr
 from skimage import filters
@@ -1382,10 +1382,6 @@ def find_intersections(x1: np.ndarray, y1: np.ndarray,
     list of tuple of (float, float)
         List of (x, y) tuples with the intersections found.
     """
-    # Create interpolated functions for both curves
-    f1 = interp1d(x1, y1, kind='linear', bounds_error=False, fill_value=0)
-    f2 = interp1d(x2, y2, kind='linear', bounds_error=False, fill_value=0)
-
     # Create a common finer grid for greater precision
     x_min = max(x1.min(), x2.min())
     x_max = min(x1.max(), x2.max())
@@ -1396,7 +1392,7 @@ def find_intersections(x1: np.ndarray, y1: np.ndarray,
     x_common = np.linspace(x_min, x_max, 10000)
 
     # Compute the difference between the curves
-    diff = f1(x_common) - f2(x_common)
+    diff = np.interp(x_common, x1, y1, left=0, right=0) - np.interp(x_common, x2, y2, left=0, right=0)
 
     # Find where the difference changes sign (intersections)
     intersections = []
@@ -1416,7 +1412,7 @@ def find_intersections(x1: np.ndarray, y1: np.ndarray,
                     break
 
             if add_point:
-                intersections.append((x_int, f1(x_int)))
+                intersections.append((x_int, float(np.interp(x_int, x1, y1, left=0, right=0))))
 
     return intersections
 
