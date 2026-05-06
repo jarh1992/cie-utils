@@ -352,7 +352,10 @@ def get_pdf(
     n = len(data)
     bin_width = 2 * iqr_value / (n ** (1 / 3))  # Bin width
     data_range = np.amax(data) - np.amin(data)  # Range of the data
-    bins = int(np.ceil(data_range / bin_width))  # Number of bins
+    if bin_width == 0:
+        bins = max(1, int(np.ceil(np.sqrt(n))))  # fallback when IQR is 0 (uniform data)
+    else:
+        bins = max(1, int(np.ceil(data_range / bin_width)))  # Number of bins
     # print("#" * 30, "BINS", bins)
 
     steps = (np.amax(data) + 1 - np.amin(data)) / bins
