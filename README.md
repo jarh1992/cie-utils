@@ -2,6 +2,7 @@
 
 > Advanced image processing in Python using the **CIELAB** color space.
 
+[![DOI](https://zenodo.org/badge/1025291342.svg)](https://doi.org/10.5281/zenodo.21680759)
 [![CI](https://github.com/jarh1992/cie-utils/actions/workflows/ci.yml/badge.svg)](https://github.com/jarh1992/cie-utils/actions/workflows/ci.yml)
 [![PyPI](https://github.com/jarh1992/cie-utils/actions/workflows/publish.yml/badge.svg)](https://github.com/jarh1992/cie-utils/actions/workflows/publish.yml)
 [![Docs](https://github.com/jarh1992/cie-utils/actions/workflows/deploy_docs.yml/badge.svg)](https://jarh1992.github.io/cie-utils/)
